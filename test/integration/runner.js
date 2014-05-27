@@ -17,7 +17,7 @@ var util = require('util');
 var mocha = require('mocha');
 var log = require('captains-log')();
 var TestRunner = require('waterline-adapter-tests');
-var Adapter = require('../../lib/adapter');
+var Adapter = require('../../');
 
 
 
@@ -69,8 +69,8 @@ new TestRunner({
   config: {
     host: 'localhost',
     user: process.env.DB_USER || 'root',
-    password: process.env.DB_PASS || '',
-    database: 'sailspg',
+    password: process.env.DB_PASS || 'root',
+    database: 'sailsdb2',
     port: 5432,
     schema: true,
     ssl: false
