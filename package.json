@@ -34,7 +34,8 @@
   "dependencies": {
     "async": "~0.2.9",
     "lodash": "~2.4.1",
-    "waterline-errors": "~0.10.0"
+    "waterline-errors": "~0.10.0",
+    "ibm_db": "~0.0.1"
   },
   "devDependencies": {
     "mocha": "*",
