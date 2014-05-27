@@ -2,7 +2,7 @@
   "name": "DB2",
   "version": "0.9.10",
   "description": "DB2 adapter for Sails / Waterline",
-  "main": "lib/adapter.js",
+  "main": "index.js",
   "scripts": {
     "test": "node test/integration/runner -R spec -b"
   },
@@ -22,22 +22,29 @@
     "sails.js"
   ],
   "author": "Eugenio Minardi <eugenio@ibuilings.it>",
+  "contributors": [
+    {
+      "name": "Vincenzo (Wilk) Ferrari",
+      "email": "vincenzo@ibuildings.it",
+      "url": "https://github.com/wilk"
+    }
+  ],
   "license": "MIT",
   "readmeFilename": "README.md",
   "dependencies": {
     "async": "~0.2.9",
     "lodash": "~2.4.1",
     "waterline-errors": "~0.10.0"
-    },
+  },
   "devDependencies": {
     "mocha": "*",
     "root-require": "~0.2.0",
-    "captains-log": "~0.10.6"
+    "captains-log": "~0.10.6",
+    "waterline-adapter-tests": "~0.10.0"
   },
   "waterlineAdapter": {
     "waterlineVersion": "~0.10.0",
     "interfaces": [
-
       "queryable"
     ]
   },
