@@ -209,6 +209,33 @@ module.exports = (function () {
         // addIndex: function(indexName, options, cb) {},
         // removeIndex: function(indexName, options, cb) {},
 
+        query: function (connectionName, collectionName, query, data, cb) {
+            if (_.isFunction(data)) {
+                cb = data;
+                data = null;
+            }
+
+            var connection = me.connections[connectionName],
+                collection = connection.collections[collectionName],
+                connectionString = me.getConnectionString(connection),
+                __QUERY__ = function (conn) {
+                    var callback = function (err, records) {
+                        if (err) cb(err);
+                        else cb(null, records);
+                    };
+
+                    if (data) conn.query(query, data, callback);
+                    else conn.query(query, callback);
+                },
+                operationCallback = function (err, conn) {
+                    if (err) return cb(err);
+                    else return __QUERY__(conn);
+                };
+
+            if (connection.pool) return connection.pool.open(connectionString, operationCallback);
+            else return db2.open(connectionString, operationCallback);
+        },
+
 
         /**
          *
@@ -305,9 +332,6 @@ module.exports = (function () {
             else return db2.open(connectionString, operationCallback);
         },
 
-
-        //
-
         /**
          *
          *
@@ -335,13 +359,13 @@ module.exports = (function () {
                         setData.push(key + ' = ?');
                         params.push(value);
                     });
-                    setQuery = setData.join(',');
+                    setQuery += setData.join(',');
 
                     _.each(options.where, function (key, value) {
                         whereData.push(key + ' = ?');
                         params.push(value);
                     });
-                    whereQuery = whereData.join(' AND ');
+                    whereQuery += whereData.join(' AND ');
 
                     conn.query('UPDATE ' + collection.tableName + ' SET ' + setQuery + ' WHERE ' + whereQuery, params, function (err, record) {
                         if (err) cb(err);
