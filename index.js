@@ -136,8 +136,18 @@ module.exports = (function () {
          * @param  {Function} cb [description]
          * @return {[type]}      [description]
          */
-        teardown: function (cb) {
-            cb();
+        teardown: function (connectionName, cb) {
+            var closeConnection = function (connectionName) {
+                var connection = me.connections[connectionName];
+                if (connection.connection) connection.connection.close();
+
+                delete me.connections[connectionName];
+            };
+
+            if (connectionName) closeConnection(connectionName);
+            else _.each(me.connections, closeConnection);
+
+            return cb();
         },
 
 
@@ -229,7 +239,10 @@ module.exports = (function () {
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
-                    else return __QUERY__(conn);
+                    else {
+                        connection.connection = conn;
+                        return __QUERY__(conn);
+                    }
                 };
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
@@ -287,7 +300,10 @@ module.exports = (function () {
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
-                    else return __FIND__(conn);
+                    else {
+                        connection.connection = conn;
+                        return __FIND__(conn);
+                    }
                 };
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
@@ -325,7 +341,10 @@ module.exports = (function () {
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
-                    else return __CREATE__(conn);
+                    else {
+                        connection.connection = conn;
+                        return __CREATE__(conn);
+                    }
                 };
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
@@ -374,7 +393,10 @@ module.exports = (function () {
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
-                    else return __UPDATE__(conn);
+                    else {
+                        connection.connection = conn;
+                        return __UPDATE__(conn);
+                    }
                 };
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
@@ -413,7 +435,10 @@ module.exports = (function () {
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
-                    else return __DESTROY__(conn);
+                    else {
+                        connection.connection = conn;
+                        return __DESTROY__(conn);
+                    }
                 };
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
