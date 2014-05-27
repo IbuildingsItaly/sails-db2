@@ -234,10 +234,27 @@ module.exports = (function () {
          * @param  {Function} cb             [description]
          * @return {[type]}                  [description]
          */
-        find: function (collectionName, options, cb) {
+        find: me.decorate(function (connection, collection, options, cb) {
+            'SELECT ASD, LOL FROM TABLENAME WHERE ASD=LOL AND LOL=ASD';
 
-            // If you need to access your private data for this collection:
-            var collection = _modelReferences[collectionName];
+            var selectData = _.keys(collection.schema),
+                selectQuery = selectData.join(','),
+                whereData = [],
+                whereQuery = '',
+                params = [];
+
+            _.each(options.where, function (key, value) {
+                whereData.push(key + ' = ?');
+                params.push(value);
+            });
+            whereQuery = whereData.join(' AND ');
+
+            connection.query('SELECT ' + selectQuery + ' FROM ' + collection.tableName + ' WHERE ' + whereQuery, params, function (err, records) {
+                if (err) cb(err);
+                else cb(null, records);
+            });
+
+
 
             // Options object is normalized for you:
             //
@@ -252,7 +269,7 @@ module.exports = (function () {
 
             // Respond with an error, or the results.
             cb(null, []);
-        },
+        }),
 
         /**
          *
