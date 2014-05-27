@@ -54,29 +54,6 @@ module.exports = (function () {
     // host OR database OR user OR password = separate pool.
     me.dbPools = {};
 
-    me.decorate = function (operation) {
-        return function (connectionName, collectionName, options, data, cb) {
-            var connection = me.connections[connectionName],
-                collection = connection.collections[collectionName],
-                connectionData = [
-                    'DATABASE=' + connection.config.database,
-                    'HOSTNAME=' +  connection.config.host,
-                    'UID=' +  connection.config.username,
-                    'PWD=' +  connection.config.password,
-                    'PORT=' +  connection.config.port,
-                    'PROTOCOL=TCPIP'
-                ],
-                connectionString = connectionData.join(';'),
-                operationCallback = function (err, conn) {
-                    if (err) return cb(err);
-                    else return operation(conn, collection, options, data, cb);
-                };
-
-            if (connection.pool) return connection.pool.open(connectionString, operationCallback);
-            else return db2.open(connectionString, operationCallback);
-        };
-    };
-
     me.getConnectionString = function (connection) {
         var connectionData = [
             'DATABASE=' + connection.config.database,
