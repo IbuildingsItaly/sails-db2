@@ -121,7 +121,8 @@ module.exports = (function () {
             me.connections[connection.identity] = {
                 config: connection,
                 collections: collections,
-                pool: connection.pool ? new db2.Pool() : null
+                pool: connection.pool ? new db2.Pool() : null,
+                conn: null
             };
 
             return cb();
@@ -139,7 +140,7 @@ module.exports = (function () {
         teardown: function (connectionName, cb) {
             var closeConnection = function (connectionName) {
                 var connection = me.connections[connectionName];
-                if (connection.connection) connection.connection.close();
+                if (connection.conn) connection.conn.close();
 
                 delete me.connections[connectionName];
             };
@@ -225,13 +226,13 @@ module.exports = (function () {
          * @param  {Function} cb             [description]
          * @return {[type]}                  [description]
          */
-        drop: function (collectionName, relations, cb) {
+        /*drop: function (collectionName, relations, cb) {
             // If you need to access your private data for this collection:
             var collection = _modelReferences[collectionName];
 
             // Drop a "table" or "collection" schema from the data store
             cb();
-        },
+        },*/
 
 
         // OVERRIDES NOT CURRENTLY FULLY SUPPORTED FOR:
@@ -250,22 +251,21 @@ module.exports = (function () {
             }
 
             var connection = me.connections[connectionName],
-                collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
-                __QUERY__ = function (conn) {
+                __QUERY__ = function () {
                     var callback = function (err, records) {
                         if (err) cb(err);
                         else cb(null, records);
                     };
 
-                    if (data) conn.query(query, data, callback);
-                    else conn.query(query, callback);
+                    if (data) connection.conn.query(query, data, callback);
+                    else connection.conn.query(query, callback);
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
                     else {
-                        connection.connection = conn;
-                        return __QUERY__(conn);
+                        connection.conn = conn;
+                        return __QUERY__();
                     }
                 };
 
@@ -292,8 +292,7 @@ module.exports = (function () {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
-                __FIND__ = function (conn) {
-                    //'SELECT ASD, LOL FROM TABLENAME WHERE ASD=LOL AND LOL=ASD';
+                __FIND__ = function () {
                     var selectData = _.keys(collection.schema),
                         selectQuery = selectData.join(','),
                         whereData = [],
@@ -304,9 +303,9 @@ module.exports = (function () {
                         whereData.push(key + ' = ?');
                         params.push(value);
                     });
-                    whereQuery = whereData.join(' AND ');
+                    whereQuery += whereData.join(' AND ');
 
-                    conn.query('SELECT ' + selectQuery + ' FROM ' + collection.tableName + ' WHERE ' + whereQuery, params, function (err, records) {
+                    connection.conn.query('SELECT ' + selectQuery + ' FROM ' + collection.tableName + ' WHERE ' + whereQuery, params, function (err, records) {
                         if (err) cb(err);
                         else cb(null, records);
                     });
@@ -325,8 +324,8 @@ module.exports = (function () {
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
                     else {
-                        connection.connection = conn;
-                        return __FIND__(conn);
+                        connection.conn = conn;
+                        return __FIND__();
                     }
                 };
 
@@ -347,7 +346,7 @@ module.exports = (function () {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
-                __CREATE__ = function (conn) {
+                __CREATE__ = function () {
                     var columns = [],
                         params = [],
                         questions = [];
@@ -358,7 +357,7 @@ module.exports = (function () {
                         questions.push('?');
                     });
 
-                    conn.query('INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + ')', params, function (err, record) {
+                    connection.conn.query('INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + ')', params, function (err, record) {
                         if (err) cb(err);
                         else cb(null, record);
                     });
@@ -366,8 +365,8 @@ module.exports = (function () {
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
                     else {
-                        connection.connection = conn;
-                        return __CREATE__(conn);
+                        connection.conn = conn;
+                        return __CREATE__();
                     }
                 };
 
@@ -390,8 +389,7 @@ module.exports = (function () {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
-                __UPDATE__ = function (conn) {
-                    //'UPDATE TABLE_NAME SET COL1=VAL1 WHERE ID = ID AND bla = bla';
+                __UPDATE__ = function () {
                     var setData = [],
                         setQuery = '',
                         whereData = [],
@@ -410,7 +408,7 @@ module.exports = (function () {
                     });
                     whereQuery += whereData.join(' AND ');
 
-                    conn.query('UPDATE ' + collection.tableName + ' SET ' + setQuery + ' WHERE ' + whereQuery, params, function (err, record) {
+                    connection.conn.query('UPDATE ' + collection.tableName + ' SET ' + setQuery + ' WHERE ' + whereQuery, params, function (err, record) {
                         if (err) cb(err);
                         else cb(null, record);
                     });
@@ -418,8 +416,8 @@ module.exports = (function () {
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
                     else {
-                        connection.connection = conn;
-                        return __UPDATE__(conn);
+                        connection.conn = conn;
+                        return __UPDATE__();
                     }
                 };
 
@@ -440,8 +438,7 @@ module.exports = (function () {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
-                __DESTROY__ = function (conn) {
-                    //'DELETE FROM TABLENAME WHERE ASD=LOL AND LOL=ASD';
+                __DESTROY__ = function () {
                     var whereData = [],
                         whereQuery = '',
                         params = [];
@@ -450,9 +447,9 @@ module.exports = (function () {
                         whereData.push(key + ' = ?');
                         params.push(value);
                     });
-                    whereQuery = whereData.join(' AND ');
+                    whereQuery += whereData.join(' AND ');
 
-                    conn.query('DELETE FROM ' + collection.tableName + ' WHERE ' + whereQuery, params, function (err, record) {
+                    connection.conn.query('DELETE FROM ' + collection.tableName + ' WHERE ' + whereQuery, params, function (err, record) {
                         if (err) cb(err);
                         else cb(null, record);
                     });
@@ -460,8 +457,8 @@ module.exports = (function () {
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
                     else {
-                        connection.connection = conn;
-                        return __DESTROY__(conn);
+                        connection.conn = conn;
+                        return __DESTROY__();
                     }
                 };
 
