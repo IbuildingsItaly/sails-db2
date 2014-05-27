@@ -161,7 +161,7 @@ module.exports = (function () {
          * @param  {Function} cb             [description]
          * @return {[type]}                  [description]
          */
-        /*define: function (collectionName, definition, cb) {
+        /*define: function (connectionName, collectionName, definition, cb) {
 
             // If you need to access your private data for this collection:
             var collection = _modelReferences[collectionName];
@@ -179,15 +179,39 @@ module.exports = (function () {
          * @param  {Function} cb             [description]
          * @return {[type]}                  [description]
          */
-        /*describe: function (collectionName, cb) {
+        describe: function (connectionName, collectionName, cb) {
+            var connection = me.connection[connectionName],
+                collection = connection.collections[collectionName],
+                query = 'DESCRIBE INDEXES FOR TABLE ' + collectionName + ' SHOW DETAIL';
 
-            // If you need to access your private data for this collection:
-            var collection = _modelReferences[collectionName];
+            adapter.query(connectionName, collectionName, query, function (err, attributes) {
+                if (err) return cb(err);
 
-            // Respond with the schema (attributes) for a collection or table in the data store
-            var attributes = {};
-            cb(null, attributes);
-        },*/
+                // Loop through Schema and attach extra attributes
+                attributes.forEach(function (attr) {
+
+                    // Set Primary Key Attribute
+                    if (attr.Key === 'PRI') {
+                        attr.primaryKey = true;
+
+                        // If also an integer set auto increment attribute
+                        if (attr.Type === 'int(11)') {
+                            attr.autoIncrement = true;
+                        }
+                    }
+
+                    // Set Unique Attribute
+                    if (attr.Key === 'UNI') {
+                        attr.unique = true;
+                    }
+                });
+
+                // Set Internal Schema Mapping
+                collection.schema = attributes;
+
+                cb(null, attributes);
+            });
+        },
 
 
         /**
