@@ -349,23 +349,23 @@ module.exports = (function () {
          * @param  {Function} cb             [description]
          * @return {[type]}                  [description]
          */
-        destroy: function (collectionName, options, cb) {
+        destroy: me.decorate(function (connection, collection, options, cb) {
+            'DELETE FROM TABLENAME WHERE ASD=LOL AND LOL=ASD';
+            var whereData = [],
+                whereQuery = '',
+                params = [];
 
-            // If you need to access your private data for this collection:
-            var collection = _modelReferences[collectionName];
+            _.each(options.where, function (key, value) {
+                whereData.push(key + ' = ?');
+                params.push(value);
+            });
+            whereQuery = whereData.join(' AND ');
 
-
-            // 1. Filter, paginate, and sort records from the datastore.
-            //    You should end up w/ an array of objects as a result.
-            //    If no matches were found, this will be an empty array.
-            //
-            // 2. Destroy all result records.
-            //
-            // (do both in a single query if you can-- it's faster)
-
-            // Return an error, otherwise it's declared a success.
-            cb();
-        },
+            connection.query('DELETE FROM ' + collection.tableName + ' WHERE ' + whereQuery, params, function (err, record) {
+                if (err) cb(err);
+                else cb(null, record);
+            });
+        })
 
 
         /*
