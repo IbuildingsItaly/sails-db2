@@ -56,17 +56,59 @@ module.exports = (function () {
 
     me.getConnectionString = function (connection) {
         var connectionData = [
-            'DATABASE=' + connection.config.database,
-            'HOSTNAME=' +  connection.config.host,
-            'UID=' +  connection.config.username,
-            'PWD=' +  connection.config.password,
-            'PORT=' +  connection.config.port,
+            'DRIVER={DB2}',
+                'DATABASE=' + connection.config.database,
+                'HOSTNAME=' +  connection.config.host,
+                'UID=' +  connection.config.user,
+                'PWD=' +  connection.config.password,
+                'PORT=' +  connection.config.port,
             'PROTOCOL=TCPIP'
         ];
 
         return connectionData.join(';');
     };
 
+    me.escape = function (word) {
+        return "'" + word.replace("'", "''") + "'";
+    };
+
+    // Data types
+    // Waterline source: https://www.npmjs.org/package/waterline#attributes
+    // IBM DB2 source: http://publib.boulder.ibm.com/infocenter/dzichelp/v2r2/index.jsp?topic=%2Fcom.ibm.db2z9.doc.sqlref%2Fsrc%2Ftpc%2Fdb2z_datatypesintro.htm
+    me.typeMap = {
+        // Times
+        TIMESTMP: 'time',
+        TIME: 'time',
+        DATE: 'date',
+
+        // Binaries
+        BINARY: 'binary',
+        VARBINARY: 'binary',
+
+        // Strings
+        CHAR: 'string',
+        VARCHAR: 'string',
+        GRAPHIC: 'string',
+        VARGRAPHIC: 'string',
+
+        // Integers
+        SMALLINT: 'integer',
+        INTEGER: 'integer',
+        BIGINT: 'integer',
+
+        // Floats
+        DECIMAL: 'float',
+        DECFLOAT: 'float',
+        REAL: 'float',
+        DOUBLE: 'float',
+
+        // Texts
+        CLOB: 'text',
+        BLOB: 'text',
+        DBCLOB: 'text',
+        XML: 'text'
+
+    };
 
     var adapter = {
         identity: 'sails-db2',
@@ -164,12 +206,12 @@ module.exports = (function () {
          */
         /*define: function (connectionName, collectionName, definition, cb) {
 
-            // If you need to access your private data for this collection:
-            var collection = _modelReferences[collectionName];
+         // If you need to access your private data for this collection:
+         var collection = _modelReferences[collectionName];
 
-            // Define a new "table" or "collection" schema in the data store
-            cb();
-        },*/
+         // Define a new "table" or "collection" schema in the data store
+         cb();
+         },*/
 
         /**
          *
@@ -181,36 +223,34 @@ module.exports = (function () {
          * @return {[type]}                  [description]
          */
         describe: function (connectionName, collectionName, cb) {
-            var connection = me.connection[connectionName],
+            var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
-                query = 'DESCRIBE INDEXES FOR TABLE ' + collectionName + ' SHOW DETAIL';
+                query = 'SELECT DISTINCT(NAME), COLTYPE, IDENTITY, KEYSEQ, NULLS FROM Sysibm.syscolumns WHERE tbname = ' + me.escape(collectionName);
 
             adapter.query(connectionName, collectionName, query, function (err, attributes) {
                 if (err) return cb(err);
 
+                var schema = {};
                 // Loop through Schema and attach extra attributes
+                // @todo: check out a better solution to define primary keys following db2 docs
                 attributes.forEach(function (attr) {
+                    var attribute = {
+                        type: me.typeMap[attr.COLTYPE.trim()]
+                    };
 
-                    // Set Primary Key Attribute
-                    if (attr.Key === 'PRI') {
-                        attr.primaryKey = true;
-
-                        // If also an integer set auto increment attribute
-                        if (attr.Type === 'int(11)') {
-                            attr.autoIncrement = true;
-                        }
+                    if (attr.IDENTITY === 'Y' && attr.KEYSEQ !== 0 && attr.NULLS === 'N' && attribute.type === 'integer') {
+                        attribute.primaryKey = true;
+                        attribute.autoIncrement = true;
+                        attribute.unique = true;
                     }
 
-                    // Set Unique Attribute
-                    if (attr.Key === 'UNI') {
-                        attr.unique = true;
-                    }
+                    schema[attr.NAME] = attribute;
                 });
 
                 // Set Internal Schema Mapping
-                collection.schema = attributes;
+                collection.schema = schema;
 
-                cb(null, attributes);
+                cb(null, schema);
             });
         },
 
@@ -227,12 +267,12 @@ module.exports = (function () {
          * @return {[type]}                  [description]
          */
         /*drop: function (collectionName, relations, cb) {
-            // If you need to access your private data for this collection:
-            var collection = _modelReferences[collectionName];
+         // If you need to access your private data for this collection:
+         var collection = _modelReferences[collectionName];
 
-            // Drop a "table" or "collection" schema from the data store
-            cb();
-        },*/
+         // Drop a "table" or "collection" schema from the data store
+         cb();
+         },*/
 
 
         // OVERRIDES NOT CURRENTLY FULLY SUPPORTED FOR:
@@ -305,7 +345,9 @@ module.exports = (function () {
                     });
                     whereQuery += whereData.join(' AND ');
 
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM ' + collection.tableName + ' WHERE ' + whereQuery, params, function (err, records) {
+                    if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
+
+                    connection.conn.query('SELECT ' + selectQuery + ' FROM ' + collection.tableName + whereQuery, params, function (err, records) {
                         if (err) cb(err);
                         else cb(null, records);
                     });
@@ -351,9 +393,9 @@ module.exports = (function () {
                         params = [],
                         questions = [];
 
-                    _.each(values, function (key, value) {
-                        columns.push(key);
-                        params.push(value);
+                    _.each(values, function (param, column) {
+                        columns.push(column);
+                        params.push(param);
                         questions.push('?');
                     });
 
@@ -408,7 +450,9 @@ module.exports = (function () {
                     });
                     whereQuery += whereData.join(' AND ');
 
-                    connection.conn.query('UPDATE ' + collection.tableName + ' SET ' + setQuery + ' WHERE ' + whereQuery, params, function (err, record) {
+                    if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
+
+                    connection.conn.query('UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery, params, function (err, record) {
                         if (err) cb(err);
                         else cb(null, record);
                     });
@@ -449,7 +493,9 @@ module.exports = (function () {
                     });
                     whereQuery += whereData.join(' AND ');
 
-                    connection.conn.query('DELETE FROM ' + collection.tableName + ' WHERE ' + whereQuery, params, function (err, record) {
+                    if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
+
+                    connection.conn.query('DELETE FROM ' + collection.tableName + whereQuery, params, function (err, record) {
                         if (err) cb(err);
                         else cb(null, record);
                     });
