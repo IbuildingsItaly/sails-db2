@@ -5,7 +5,6 @@ var _ = require('lodash'),
     db2 = require('ibm_db'),
     WaterlineAdapterErrors = require('waterline-errors').adapter;
 
-
 /**
  * Sails Boilerplate Adapter
  *
@@ -122,13 +121,10 @@ module.exports = (function () {
         // Default configuration for collections
         // (same effect as if these properties were included at the top level of the model definitions)
         defaults: {
-
-            // For example:
-            // port: 3306,
-            // host: 'localhost',
-            // schema: true,
-            // ssl: false,
-            // customThings: ['eh']
+            host: 'localhost',
+            port: 50000,
+            schema: true,
+            ssl: false,
 
             // If setting syncable, you should consider the migrate option,
             // which allows you to set how the sync will be performed.
@@ -394,14 +390,16 @@ module.exports = (function () {
                         questions = [];
 
                     _.each(values, function (param, column) {
-                        columns.push(column);
-                        params.push(param);
-                        questions.push('?');
+                        if (collection.schema.hasOwnProperty(column)) {
+                            columns.push(column);
+                            params.push(param);
+                            questions.push('?');
+                        }
                     });
 
-                    connection.conn.query('INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + ')', params, function (err, record) {
+                    connection.conn.query('SELECT * FROM NEW TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
                         if (err) cb(err);
-                        else cb(null, record);
+                        else cb(null, results[0]);
                     });
                 },
                 operationCallback = function (err, conn) {
@@ -438,23 +436,27 @@ module.exports = (function () {
                         whereQuery = '',
                         params = [];
 
-                    _.each(values, function (key, value) {
-                        setData.push(key + ' = ?');
-                        params.push(value);
+                    _.each(values, function (param, column) {
+                        if (collection.schema.hasOwnProperty(column) && !collection.schema[column].autoIncrement) {
+                            setData.push(column + ' = ?');
+                            params.push(param);
+                        }
                     });
                     setQuery += setData.join(',');
 
-                    _.each(options.where, function (key, value) {
-                        whereData.push(key + ' = ?');
-                        params.push(value);
+                    _.each(options.where, function (param, column) {
+                        if (collection.schema.hasOwnProperty(column)) {
+                            whereData.push(column + ' = ?');
+                            params.push(param);
+                        }
                     });
                     whereQuery += whereData.join(' AND ');
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery, params, function (err, record) {
+                    connection.conn.query('SELECT * FROM NEW TABLE (UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + ')', params, function (err, results) {
                         if (err) cb(err);
-                        else cb(null, record);
+                        else cb(null, results[0]);
                     });
                 },
                 operationCallback = function (err, conn) {
@@ -487,9 +489,11 @@ module.exports = (function () {
                         whereQuery = '',
                         params = [];
 
-                    _.each(options.where, function (key, value) {
-                        whereData.push(key + ' = ?');
-                        params.push(value);
+                    _.each(options.where, function (param, column) {
+                        if (collection.schema.hasOwnProperty(column)) {
+                            whereData.push(column + ' = ?');
+                            params.push(param);
+                        }
                     });
                     whereQuery += whereData.join(' AND ');
 
