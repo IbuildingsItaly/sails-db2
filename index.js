@@ -110,6 +110,10 @@ module.exports = (function () {
 
     };
 
+    me.getSelectAttributes = function (collection) {
+        return _.keys(collection.definition).join(',');
+    };
+
     var adapter = {
         identity: 'sails-db2',
 
@@ -201,14 +205,9 @@ module.exports = (function () {
          * @param  {Function} cb             [description]
          * @return {[type]}                  [description]
          */
-        /*define: function (connectionName, collectionName, definition, cb) {
-
-         // If you need to access your private data for this collection:
-         var collection = _modelReferences[collectionName];
-
-         // Define a new "table" or "collection" schema in the data store
-         cb();
-         },*/
+        define: function (connectionName, collectionName, definition, cb) {
+            cb();
+        },
 
         /**
          *
@@ -224,13 +223,14 @@ module.exports = (function () {
                 collection = connection.collections[collectionName],
                 query = 'SELECT DISTINCT(NAME), COLTYPE, IDENTITY, KEYSEQ, NULLS FROM Sysibm.syscolumns WHERE tbname = ' + me.escape(collectionName);
 
-            adapter.query(connectionName, collectionName, query, function (err, attributes) {
+            // @todo: use DB2 Database describe method instead of a SQL Query
+            adapter.query(connectionName, collectionName, query, function (err, attrs) {
                 if (err) return cb(err);
 
-                var schema = {};
+                var attributes = {};
                 // Loop through Schema and attach extra attributes
                 // @todo: check out a better solution to define primary keys following db2 docs
-                attributes.forEach(function (attr) {
+                attrs.forEach(function (attr) {
                     var attribute = {
                         type: me.typeMap[attr.COLTYPE.trim()]
                     };
@@ -241,13 +241,10 @@ module.exports = (function () {
                         attribute.unique = true;
                     }
 
-                    schema[attr.NAME] = attribute;
+                    attributes[attr.NAME] = attribute;
                 });
 
-                // Set Internal Schema Mapping
-                collection.schema = schema;
-
-                cb(null, schema);
+                cb(null, attributes);
             });
         },
 
@@ -360,14 +357,13 @@ module.exports = (function () {
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
                 __FIND__ = function () {
-                    var selectData = _.keys(collection.schema),
-                        selectQuery = selectData.join(','),
+                    var selectQuery = me.getSelectAttributes(collection),
                         whereData = [],
                         whereQuery = '',
                         params = [];
 
                     _.each(options.where, function (param, column) {
-                        if (collection.schema.hasOwnProperty(column)) {
+                        if (collection.definition.hasOwnProperty(column)) {
                             whereData.push(column + ' = ?');
                             params.push(param);
                         }
@@ -415,19 +411,20 @@ module.exports = (function () {
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
                 __CREATE__ = function () {
-                    var columns = [],
+                    var selectQuery = me.getSelectAttributes(collection),
+                        columns = [],
                         params = [],
                         questions = [];
 
                     _.each(values, function (param, column) {
-                        if (collection.schema.hasOwnProperty(column)) {
+                        if (collection.definition.hasOwnProperty(column)) {
                             columns.push(column);
                             params.push(param);
                             questions.push('?');
                         }
                     });
 
-                    connection.conn.query('SELECT * FROM NEW TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
+                    connection.conn.query('SELECT ' + selectQuery + ' FROM NEW TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
@@ -460,14 +457,15 @@ module.exports = (function () {
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
                 __UPDATE__ = function () {
-                    var setData = [],
+                    var selectQuery = me.getSelectAttributes(collection),
+                        setData = [],
                         setQuery = '',
                         whereData = [],
                         whereQuery = '',
                         params = [];
 
                     _.each(values, function (param, column) {
-                        if (collection.schema.hasOwnProperty(column) && !collection.schema[column].autoIncrement) {
+                        if (collection.definition.hasOwnProperty(column) && !collection.definition[column].autoIncrement) {
                             setData.push(column + ' = ?');
                             params.push(param);
                         }
@@ -475,7 +473,7 @@ module.exports = (function () {
                     setQuery += setData.join(',');
 
                     _.each(options.where, function (param, column) {
-                        if (collection.schema.hasOwnProperty(column)) {
+                        if (collection.definition.hasOwnProperty(column)) {
                             whereData.push(column + ' = ?');
                             params.push(param);
                         }
@@ -484,7 +482,7 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('SELECT * FROM NEW TABLE (UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + ')', params, function (err, results) {
+                    connection.conn.query('SELECT ' + selectQuery + ' FROM NEW TABLE (UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + ')', params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
@@ -520,7 +518,7 @@ module.exports = (function () {
                         params = [];
 
                     _.each(options.where, function (param, column) {
-                        if (collection.schema.hasOwnProperty(column)) {
+                        if (collection.definition.hasOwnProperty(column)) {
                             whereData.push(column + ' = ?');
                             params.push(param);
                         }
