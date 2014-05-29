@@ -357,11 +357,18 @@ module.exports = (function () {
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
                 __FIND__ = function () {
-                    var selectQuery = me.getSelectAttributes(collection),
+                    var selectQuery = 'SELECT ' + me.getSelectAttributes(collection),
+                        fromQuery = ' FROM ' + collection.tableName,
                         whereData = [],
                         whereQuery = '',
-                        params = [];
+                        limitQuery = options.limit ? ' LIMIT ' + options.limit : '',
+                        skipQuery = options.skip ? ' OFFSET ' + options.skip : '',
+                        sortData = [],
+                        sortQuery = '',
+                        params = [],
+                        sqlQuery = '';
 
+                    // Building where clause
                     _.each(options.where, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
                             whereData.push(column + ' = ?');
@@ -369,10 +376,21 @@ module.exports = (function () {
                         }
                     });
                     whereQuery += whereData.join(' AND ');
-
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM ' + collection.tableName + whereQuery, params, cb);
+                    // Building sort clause
+                    _.each(options.sort, function (direction, column) {
+                        if (collection.definition.hasOwnProperty(column)) {
+                            //ORDER BY APPLICATIONCODE DESC
+
+                            sortData.push(column + ' ' + direction);
+                        }
+                    });
+                    sortQuery += sortData.join(', ');
+                    if (sortQuery.length > 0) sortQuery = ' ORDER BY ' + sortQuery;
+
+                    sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery + skipQuery;
+                    connection.conn.query(sqlQuery, params, cb);
 
                     // Options object is normalized for you:
                     //
