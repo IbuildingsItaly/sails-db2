@@ -19,12 +19,12 @@ Add the db2 config to the config/adapters.js file. Basic options:
 
 ```javascript
 module.exports.adapters = {
-  'default': 'db2',
+  default: 'db2',
 
   db2: {
     module   : 'sails-db2',
     host     : 'localhost',
-    port     : 3306,
+    port     : 50000,
     user     : 'username',
     password : 'password',
     database : 'DB2 Database Name'
