@@ -335,18 +335,17 @@ module.exports = (function () {
                         whereQuery = '',
                         params = [];
 
-                    _.each(options.where, function (key, value) {
-                        whereData.push(key + ' = ?');
-                        params.push(value);
+                    _.each(options.where, function (param, column) {
+                        if (collection.schema.hasOwnProperty(column)) {
+                            whereData.push(column + ' = ?');
+                            params.push(param);
+                        }
                     });
                     whereQuery += whereData.join(' AND ');
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM ' + collection.tableName + whereQuery, params, function (err, records) {
-                        if (err) cb(err);
-                        else cb(null, records);
-                    });
+                    connection.conn.query('SELECT ' + selectQuery + ' FROM ' + collection.tableName + whereQuery, params, cb);
 
                     // Options object is normalized for you:
                     //
@@ -499,10 +498,7 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('DELETE FROM ' + collection.tableName + whereQuery, params, function (err, record) {
-                        if (err) cb(err);
-                        else cb(null, record);
-                    });
+                    connection.conn.query('DELETE FROM ' + collection.tableName + whereQuery, params, cb);
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
