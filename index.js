@@ -1,7 +1,8 @@
 /**
  * Module Dependencies
  */
-var _ = require('lodash'),
+var async = require('async'),
+    _ = require('lodash'),
     db2 = require('ibm_db'),
     WaterlineAdapterErrors = require('waterline-errors').adapter;
 
@@ -262,13 +263,43 @@ module.exports = (function () {
          * @param  {Function} cb             [description]
          * @return {[type]}                  [description]
          */
-        /*drop: function (collectionName, relations, cb) {
-         // If you need to access your private data for this collection:
-         var collection = _modelReferences[collectionName];
+        drop: function (connectionName, collectionName, relations, cb) {
+            if (_.isFunction(relations)) {
+                cb = relations;
+                relations = [];
+            }
 
-         // Drop a "table" or "collection" schema from the data store
-         cb();
-         },*/
+            var connection = me.connections[connectionName],
+                connectionString = me.getConnectionString(connection),
+                __DROP__ = function () {
+                    // Drop any relations
+                    var dropTable = function (tableName, next) {
+                        // Build query
+                        var query = 'DROP TABLE ' + tableName;
+
+                        // Run query
+                        connection.conn.query(query, next);
+                    };
+
+                    async.eachSeries(relations, dropTable, function(err) {
+                        if (err) return cb(err);
+
+                        return dropTable(collectionName, cb);
+                    });
+
+                    connection.conn.query('DROP TABLE ' + collectionName, data, cb);
+                },
+                operationCallback = function (err, conn) {
+                    if (err) return cb(err);
+                    else {
+                        connection.conn = conn;
+                        return __DROP__();
+                    }
+                };
+
+            if (connection.pool) return connection.pool.open(connectionString, operationCallback);
+            else return db2.open(connectionString, operationCallback);
+        },
 
 
         // OVERRIDES NOT CURRENTLY FULLY SUPPORTED FOR:
