@@ -8,7 +8,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/kmox83/sails-db2.git"
+    "url": "https://github.com/IbuildingsItaly/sails-db2"
   },
   "keywords": [
     "DB2",
@@ -21,8 +21,13 @@
     "sailsjs",
     "sails.js"
   ],
-  "author": "Eugenio Minardi <eugenio@ibuilings.it>",
+  "author": "Ibuildings SRL <info@ibuildings.it> (http://ibuildings.it/)",
   "contributors": [
+    {
+      "name": "Eugenio Minardi",
+      "email": "eugenio@ibuildings.it",
+      "url": "https://github.com/kmox83"
+    },
     {
       "name": "Vincenzo (Wilk) Ferrari",
       "email": "vincenzo@ibuildings.it",
@@ -32,10 +37,9 @@
   "license": "MIT",
   "readmeFilename": "README.md",
   "dependencies": {
-    "async": "~0.2.9",
+    "async": "^0.9.0",
     "lodash": "~2.4.1",
-    "waterline-errors": "~0.10.0",
-    "ibm_db": "~0.0.1"
+    "waterline-errors": "~0.10.0"
   },
   "devDependencies": {
     "mocha": "*",
