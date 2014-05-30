@@ -1,6 +1,6 @@
 {
   "name": "db2",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "DB2 adapter for Sails / Waterline",
   "main": "index.js",
   "scripts": {
