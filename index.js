@@ -57,11 +57,11 @@ module.exports = (function () {
     me.getConnectionString = function (connection) {
         var connectionData = [
             'DRIVER={DB2}',
-                'DATABASE=' + connection.config.database,
-                'HOSTNAME=' +  connection.config.host,
-                'UID=' +  connection.config.user,
-                'PWD=' +  connection.config.password,
-                'PORT=' +  connection.config.port,
+            'DATABASE=' + connection.config.database,
+            'HOSTNAME=' +  connection.config.host,
+            'UID=' +  connection.config.user,
+            'PWD=' +  connection.config.password,
+            'PORT=' +  connection.config.port,
             'PROTOCOL=TCPIP'
         ];
 
@@ -107,7 +107,36 @@ module.exports = (function () {
         BLOB: 'text',
         DBCLOB: 'text',
         XML: 'text'
+    };
 
+    me.getSqlType = function (attrType) {
+        var type = '';
+
+        switch (attrType) {
+            case 'string':
+                type = 'VARCHAR';
+                break;
+            case 'integer':
+                type = 'INTEGER';
+                break;
+            case 'float':
+                type = 'DOUBLE';
+                break;
+            case 'text':
+                type = 'BLOB';
+                break;
+            case 'binary':
+                type = 'VARBINARY';
+                break;
+            case 'time':
+                type = 'TIMESTMP';
+                break;
+            case 'date':
+                type = 'DATE'
+                break;
+        }
+
+        return type;
     };
 
     me.getSelectAttributes = function (collection) {
@@ -120,7 +149,7 @@ module.exports = (function () {
         // Set to true if this adapter supports (or requires) things like data types, validations, keys, etc.
         // If true, the schema for models using this adapter will be automatically synced when the server starts.
         // Not terribly relevant if your data store is not SQL/schemaful.
-        syncable: false,
+        syncable: true,
 
 
         // Default configuration for collections
@@ -206,7 +235,53 @@ module.exports = (function () {
          * @return {[type]}                  [description]
          */
         define: function (connectionName, collectionName, definition, cb) {
-            cb();
+            var connection = me.connections[connectionName],
+                collection = connection.collections[collectionName],
+                query = 'CREATE TABLE ' + collectionName,
+                schemaData = [],
+                schemaQuery = '';
+
+            _.each(definition, function (attribute, attrName) {
+                var attrType = me.getSqlType(attribute.type),
+                    attrQuery = attrName;
+
+                // @todo: handle unique and other DB2 data types
+                if (attribute.primaryKey) {
+                    if (attribute.autoIncrement) attrQuery += ' INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY';
+                    else attrQuery += ' VARCHAR(255) NOT NULL PRIMARY KEY';
+                }
+                else {
+                    switch (attrType) {
+                        case 'VARCHAR':
+                            var len = attribute.length || 255;
+                            attrQuery += ' ' + attrType + '(' + len + ')';
+                            break;
+                        // @todo: handle each type with correct params
+                        case 'DOUBLE':
+                        case 'BLOB':
+                        case 'VARBINARY':
+                        case 'TIMESTMP':
+                        case 'DATE':
+                        case 'INTEGER':
+                        default:
+                            attrQuery += ' ' + attrType;
+                    }
+                }
+
+                schemaData.push(attrQuery);
+            });
+            schemaQuery += '(' + schemaData.join(',') + ')';
+
+            query += ' ' + schemaQuery;
+            // @todo: use DB2 Database describe method instead of a SQL Query
+            return adapter.query(connectionName, collectionName, query, function (err, result) {
+                if (err) {
+                    if (err.state !== '42S01') return cb(err);
+                    result = [];
+                }
+
+                return cb(null, result);
+            });
         },
 
         /**
@@ -226,6 +301,7 @@ module.exports = (function () {
             // @todo: use DB2 Database describe method instead of a SQL Query
             adapter.query(connectionName, collectionName, query, function (err, attrs) {
                 if (err) return cb(err);
+                if (attrs.length === 0) return cb(null, null);
 
                 var attributes = {};
                 // Loop through Schema and attach extra attributes
@@ -271,20 +347,27 @@ module.exports = (function () {
                 __DROP__ = function () {
                     // Drop any relations
                     var dropTable = function (tableName, next) {
-                        // Build query
-                        var query = 'DROP TABLE ' + tableName;
+                            // Build query
+                            var query = 'DROP TABLE ' + tableName;
 
-                        // Run query
-                        connection.conn.query(query, next);
-                    };
+                            // Run query
+                            connection.conn.query(query, next);
+                        },
+                        passCallback = function (err, result) {
+                            if (err) {
+                                if (err.state !== '42S02') return cb(err);
+                                result = [];
+                            }
+                            cb(null, result);
+                        };
 
                     async.eachSeries(relations, dropTable, function(err) {
                         if (err) return cb(err);
 
-                        return dropTable(collectionName, cb);
+                        return dropTable(collectionName, passCallback);
                     });
 
-                    connection.conn.query('DROP TABLE ' + collectionName, data, cb);
+                    connection.conn.query('DROP TABLE ' + collectionName, relations, passCallback);
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
