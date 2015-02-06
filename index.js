@@ -86,6 +86,8 @@ module.exports = (function () {
             case 'CLOSE':
                 dbgString = 'Closing Connection';
                 break;
+            case 'MSG':
+                dbgString = param1;
             default:
                 dbgString = '!! BUG IN DEBUG CODE !!';
         }
@@ -326,6 +328,8 @@ module.exports = (function () {
             schemaQuery += '(' + schemaData.join(',') + ')';
 
             query += ' ' + schemaQuery;
+            logAction('define', 'SQL', query);
+            
             // @todo: use DB2 Database describe method instead of a SQL Query
             return adapter.query(connectionName, collectionName, query, function (err, result) {
                 if (err) {
@@ -350,9 +354,9 @@ module.exports = (function () {
         describe: function (connectionName, collectionName, cb) {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
-                query = 'SELECT NAME, COLTYPE, IDENTITY, KEYSEQ, NULLS, LENGTH'
-                    + ' FROM Sysibm.syscolumns'
-                    + ' WHERE tbname = ' + me.escape(collectionName) + ' AND TBCREATOR = CURRENT SCHEMA'
+                query = 'SELECT COLNAME, TYPENAME, LENGTH, NULLS, LENGTH, DEFAULT, IDENTITY'
+                    + ' FROM SYSCAT.COLUMNS'
+                    + ' WHERE TABSCHEMA = (CURRENT SCHEMA) AND TABNAME = ' + me.escape(collectionName)
                     + ' ORDER BY COLNO';
                 logAction('describe', 'SQL', query);
 
@@ -366,18 +370,18 @@ module.exports = (function () {
                 // @todo: check out a better solution to define primary keys following db2 docs
                 attrs.forEach(function (attr) {
                     var attribute = {
-                        type: me.typeMap[attr.COLTYPE.trim()],
+                        type: me.typeMap[attr.TYPENAME.trim()],
                         maxLength: attr.LENGTH,
-                        required: ((isNaN(attr.DEFAULT) || attr.DEFAULT === 0) && attr.NULL === 'N')
+                        required: ((isNaN(attr.DEFAULT) || attr.DEFAULT === 0) && attr.NULLS === 'N')
                     };
 
-                    if (attr.IDENTITY === 'Y' && attr.KEYSEQ !== 0 && attr.NULLS === 'N' && attribute.type === 'integer') {
+                    if (attr.IDENTITY === 'Y') {
                         attribute.primaryKey = true;
                         attribute.autoIncrement = true;
                         attribute.unique = true;
                     }
 
-                    attributes[attr.NAME] = attribute;
+                    attributes[attr.COLNAME] = attribute;
                 });
 
                 cb(null, attributes);
@@ -427,6 +431,7 @@ module.exports = (function () {
                         return dropTable(collectionName, passCallback);
                     });
 
+                    logAction('drop', 'SQL', query);
                     connection.conn.query('DROP TABLE ' + collectionName, relations, passCallback);
                 },
                 operationCallback = function (err, conn) {
@@ -461,16 +466,26 @@ module.exports = (function () {
                 connectionString = me.getConnectionString(connection),
                 __QUERY__ = function () {
                     var callback = function (err, records) {
-                        if (err) cb(err);
-                        else cb(null, records);
+                        if (err) {
+                            logAction('query', 'MSG', 'ERROR In Query');
+                            cb(err);
+                        } else {
+                            // lack of error could be enough,
+                            // but i prefer to be sure that the query has been issued
+                            logAction('query', 'MSG', 'Query OK');
+                            cb(null, records);
+                        }
                     };
 
+                    // with or without parameters (WHERE x = ?)
                     if (data) connection.conn.query(query, data, callback);
-                    else connection.conn.query(query, callback);
+                    else      connection.conn.query(query, callback);
                 },
                 operationCallback = function (err, conn) {
-                    if (err) return cb(err);
-                    else {
+                    if (err) {
+                            logAction('query', 'MSG', 'ERROR: Query Not Sent');
+                            cb(err);
+                    } else {
                         connection.conn = conn;
                         return __QUERY__();
                     }
@@ -515,6 +530,11 @@ module.exports = (function () {
                         params = [],
                         sqlQuery = '';
 
+                    // validate query
+                    if (options.skip && !options.limit) {
+                        throw new Error('Cannot specify .skip without .limit');
+                    }
+                    
                     // Building where clause
                     _.each(options.where, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
@@ -536,6 +556,7 @@ module.exports = (function () {
 
                     // assemble clauses
                     sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery + skipQuery;
+                    logAction('find', 'SQL', sqlQuery);
                     connection.conn.query(sqlQuery, params, cb);
 
                     // Options object is normalized for you:
@@ -575,6 +596,7 @@ module.exports = (function () {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
+                query = '',
                 __CREATE__ = function () {
                     var selectQuery = me.getSelectAttributes(collection),
                         columns = [],
@@ -589,8 +611,9 @@ module.exports = (function () {
                         }
                     });
 
-                    // we should only store inserted rows
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM NEW TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
+                query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))';
+                logAction('create', 'SQL', query);    
+                connection.conn.query(query, params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
@@ -628,7 +651,8 @@ module.exports = (function () {
                         setQuery = '',
                         whereData = [],
                         whereQuery = '',
-                        params = [];
+                        params = [],
+                        query = '';
 
                     _.each(values, function (param, column) {
                         if (collection.definition.hasOwnProperty(column) && !collection.definition[column].autoIncrement) {
@@ -648,8 +672,9 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    // we should only store modified rows
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM NEW TABLE (UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + ')', params, function (err, results) {
+                    query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + ')';
+                    logAction('update', 'SQL', query);
+                    connection.conn.query(query, params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
@@ -683,7 +708,8 @@ module.exports = (function () {
                 __DESTROY__ = function () {
                     var whereData = [],
                         whereQuery = '',
-                        params = [];
+                        params = [],
+                        query = '';
 
                     _.each(options.where, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
@@ -696,7 +722,9 @@ module.exports = (function () {
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
                     // dont store anything?
-                    connection.conn.query('DELETE FROM ' + collection.tableName + whereQuery + limitQuery, params, cb);
+                    query = 'DELETE FROM ' + collection.tableName + whereQuery + limitQuery;
+                    logAction('update', 'SQL', query);
+                    connection.conn.query(query, params, cb);
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
