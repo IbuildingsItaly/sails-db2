@@ -21,7 +21,8 @@ var async = require('async'),
  * and load them at the top of the file with other dependencies.  e.g. var update = `require('./lib/update')`;
  */
 module.exports = (function () {
-    var me = this;
+    var me = this,
+        debug = false;
 
     // You'll want to maintain a reference to each collection
     // (aka model) that gets registered with this adapter.
@@ -70,6 +71,25 @@ module.exports = (function () {
 
     me.escape = function (word) {
         return "'" + word.replace("'", "''") + "'";
+    };
+
+    var logAction = function (funcName, action, param1) {
+        if (debug !== true) return null;
+
+        switch (action) {
+            case 'SQL':
+                dbgString = funcName + ' will execute: ' + param1;
+                break;
+            case 'OPEN':
+                dbgString = 'Opening Connection';
+                break;
+            case 'CLOSE':
+                dbgString = 'Closing Connection';
+                break;
+            default:
+                dbgString = '!! BUG IN DEBUG CODE !!';
+        }
+        console.log(dbgString);
     };
 
     // map DB2 types to Waterline types
@@ -194,6 +214,8 @@ module.exports = (function () {
          * @return {[type]}              [description]
          */
         registerConnection: function (connection, collections, cb) {
+            logAction('registerConnection', 'OPEN');
+            
             // Validate arguments
             if (!connection.identity) return cb(WaterlineAdapterErrors.IdentityMissing);
             if (me.connections[connection.identity]) return cb(WaterlineAdapterErrors.IdentityDuplicate);
@@ -219,6 +241,8 @@ module.exports = (function () {
          * @return {[type]}      [description]
          */
         teardown: function (connectionName, cb) {
+            logAction('teardown', 'CLOSE');
+            
             var closeConnection = function (connectionName) {
                 var connection = me.connections[connectionName];
                 if (connection.conn) connection.conn.close();
@@ -330,6 +354,7 @@ module.exports = (function () {
                     + ' FROM Sysibm.syscolumns'
                     + ' WHERE tbname = ' + me.escape(collectionName) + ' AND TBCREATOR = CURRENT SCHEMA'
                     + ' ORDER BY COLNO';
+                logAction('describe', 'SQL', query);
 
             // @todo: use DB2 Database describe method instead of a SQL Query
             adapter.query(connectionName, collectionName, query, function (err, attrs) {
