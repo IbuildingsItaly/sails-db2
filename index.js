@@ -94,6 +94,15 @@ module.exports = (function () {
         console.log(dbgString);
     };
 
+    // returns FETCH ONLY clause; use this for non-SELECT statements
+    var getFetchOnly = function(rowsNumber) {
+        if (typeof rowsNumber === 'number' && rowsNumber > 0) {
+            return ' FETCH FIRST ' + rowsNumber + ' ROWS ONLY ';
+        } else {
+            return '';
+        }
+    };
+
     // map DB2 types to Waterline types
     // Waterline source: https://www.npmjs.org/package/waterline#attributes
     // IBM DB2 source: http://publib.boulder.ibm.com/infocenter/dzichelp/v2r2/index.jsp?topic=%2Fcom.ibm.db2z9.doc.sqlref%2Fsrc%2Ftpc%2Fdb2z_datatypesintro.htm
@@ -201,7 +210,7 @@ module.exports = (function () {
             // drop   => Drop schema and data, then recreate it
             // alter  => Drop/add columns as necessary.
             // safe   => Don't change anything (good for production DBs)
-            migrate: 'alter'
+            migrate: 'safe'
         },
 
 
@@ -281,7 +290,7 @@ module.exports = (function () {
                 var attrType = me.getSqlType(attribute.type),
                     attrQuery = attrName;
 
-                // @todo: handle unique and other DB2 data types
+                // @todo: check SYSCAT or IBMSYS to find primary keys and UNIQUE indexes
                 if (attribute.primaryKey) {
                     if (attribute.autoIncrement) attrQuery += ' INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY';
                     else attrQuery += ' INTEGER NOT NULL PRIMARY KEY';
@@ -333,7 +342,7 @@ module.exports = (function () {
             // @todo: use DB2 Database describe method instead of a SQL Query
             return adapter.query(connectionName, collectionName, query, function (err, result) {
                 if (err) {
-                    if (err.state !== '42S01') return cb(err);
+                    if (err.state.substring(0, 1) !== '01') return cb(err);
                     result = [];
                 }
 
@@ -352,9 +361,11 @@ module.exports = (function () {
          * @return {[type]}                  [description]
          */
         describe: function (connectionName, collectionName, cb) {
+            // @todo: we should read ROWID from db, and never update it.
+            // It's more reliable than PK's because it always exists and is only 1 column.
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
-                query = 'SELECT COLNAME, TYPENAME, LENGTH, NULLS, LENGTH, DEFAULT, IDENTITY'
+                query = 'SELECT COLNAME, TYPENAME, LENGTH, NULLS, DEFAULT, IDENTITY'
                     + ' FROM SYSCAT.COLUMNS'
                     + ' WHERE TABSCHEMA = (CURRENT SCHEMA) AND TABNAME = ' + me.escape(collectionName)
                     + ' ORDER BY COLNO';
@@ -375,6 +386,7 @@ module.exports = (function () {
                         required: ((isNaN(attr.DEFAULT) || attr.DEFAULT === 0) && attr.NULLS === 'N')
                     };
 
+                    // @todo: handle multi-column keys
                     if (attr.IDENTITY === 'Y') {
                         attribute.primaryKey = true;
                         attribute.autoIncrement = true;
@@ -411,23 +423,22 @@ module.exports = (function () {
                 __DROP__ = function () {
                     // Drop any relations
                     var dropTable = function (tableName, next) {
-                            // Build query
-                            var query = 'DROP TABLE ' + tableName;
+                        // Build query
+                        var query = 'DROP TABLE ' + tableName;
 
-                            // Run query
-                            connection.conn.query(query, next);
-                        },
-                        passCallback = function (err, result) {
-                            if (err) {
-                                if (err.state !== '42S02') return cb(err);
-                                result = [];
-                            }
-                            cb(null, result);
-                        };
+                        // Run query
+                        connection.conn.query(query, next);
+                    },
+                    passCallback = function (err, result) {
+                        if (err) {
+                            if (err.state.substring(0, 1) !== '01') return cb(err);
+                            result = [];
+                        }
+                        cb(null, result);
+                    };
 
                     async.eachSeries(relations, dropTable, function(err) {
                         if (err) return cb(err);
-
                         return dropTable(collectionName, passCallback);
                     });
 
@@ -495,7 +506,6 @@ module.exports = (function () {
             else return db2.open(connectionString, operationCallback);
         },
 
-
         /**
          *
          * SELECT
@@ -548,7 +558,6 @@ module.exports = (function () {
                     _.each(options.sort, function (direction, column) {
                         if (collection.definition.hasOwnProperty(column)) {
                             // {colName: 'DESC'} -> ORDER BY <col_name> [ASC | DESC]
-
                             sortData.push(column + ' ' + direction);
                         }
                     });
@@ -596,14 +605,17 @@ module.exports = (function () {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
-                query = '',
                 __CREATE__ = function () {
-                    var selectQuery = me.getSelectAttributes(collection),
+                    var
+                        // in case ORM columns are a subset of DB2 columns
+                        selectQuery = me.getSelectAttributes(collection),
+                        query = '',
                         columns = [],
                         params = [],
                         questions = [];
 
                     _.each(values, function (param, column) {
+                        // INTO and VALUES clauses, with ? placeholders
                         if (collection.definition.hasOwnProperty(column)) {
                             columns.push(column);
                             params.push(param);
@@ -611,9 +623,9 @@ module.exports = (function () {
                         }
                     });
 
-                query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))';
-                logAction('create', 'SQL', query);    
-                connection.conn.query(query, params, function (err, results) {
+                    query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))';
+                    logAction('create', 'SQL', query);
+                    connection.conn.query(query, params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
@@ -668,11 +680,13 @@ module.exports = (function () {
                             params.push(param);
                         }
                     });
-                    whereQuery += whereData.join(' AND ');
+                    whereQuery = whereData.join(' AND ');
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + ')';
+                    query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE ('
+                        + 'UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + getFetchOnly(options.limit)
+                        + ')';
                     logAction('update', 'SQL', query);
                     connection.conn.query(query, params, function (err, results) {
                         if (err) cb(err);
@@ -722,7 +736,7 @@ module.exports = (function () {
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
                     // dont store anything?
-                    query = 'DELETE FROM ' + collection.tableName + whereQuery + limitQuery;
+                    query = 'DELETE FROM ' + collection.tableName + whereQuery + getFetchOnly(options.limit);
                     logAction('update', 'SQL', query);
                     connection.conn.query(query, params, cb);
                 },
