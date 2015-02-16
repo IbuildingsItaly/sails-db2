@@ -4,7 +4,7 @@
 var async = require('async'),
     _ = require('lodash'),
     db2 = require('ibm_db'),
-    WaterlineAdapterErrors = require('waterline-errors').adapter;
+    adapterErrors = require('waterline-errors').adapter;
 
 /**
  * Sails Boilerplate Adapter
@@ -20,8 +20,27 @@ var async = require('async'),
  * If you do go that route, it's conventional in Node to create a `./lib` directory for your private submodules
  * and load them at the top of the file with other dependencies.  e.g. var update = `require('./lib/update')`;
  */
-module.exports = (function () {
+var modul = (function (adapterOptions) {
     var me = this;
+
+    // default options
+    var defaultAdapterOptions = {
+        // quoting table names makes them case-sensitive
+        quoteTableNames: false,
+        // default type for PK columns
+        defaultPrimaryKeyType: 'INTEGER',
+        // logger function or null
+        logger: null
+    };
+    if (_.isUndefined(adapterOptions)) {
+        adapterOptions = {};
+    }
+    _.forOwn(defaultAdapterOptions, function (val, key) {
+        if (_.isUndefined(adapterOptions[key])) {
+            adapterOptions[key] = val;
+        }
+    });
+
 
     // You'll want to maintain a reference to each collection
     // (aka model) that gets registered with this adapter.
@@ -68,47 +87,78 @@ module.exports = (function () {
         return connectionData.join(';');
     };
 
+
     me.escape = function (word) {
         return "'" + word.replace("'", "''") + "'";
     };
 
-    // Data types
+
+    me.formatTableName = function (tableName) {
+        return adapterOptions.quoteTableNames
+             ? '"' + tableName.replace('"', '""') + '"'
+            : tableName;
+    };
+
+
+    var logQuery = function (query) {
+        if (typeof adapterOptions.logger === 'function') {
+            adapterOptions.logger(query);
+        }
+        return query;
+    };
+
+
+    // returns FETCH ONLY clause; use this for non-SELECT statements
+    var getFetchOnly = function(rowsNumber) {
+        if (typeof rowsNumber === 'number' && rowsNumber > 0) {
+            return ' FETCH FIRST ' + rowsNumber + ' ROWS ONLY ';
+        } else {
+            return '';
+        }
+    };
+
+
+    // map DB2 types to Waterline types
     // Waterline source: https://www.npmjs.org/package/waterline#attributes
     // IBM DB2 source: http://publib.boulder.ibm.com/infocenter/dzichelp/v2r2/index.jsp?topic=%2Fcom.ibm.db2z9.doc.sqlref%2Fsrc%2Ftpc%2Fdb2z_datatypesintro.htm
     me.typeMap = {
         // Times
-        TIMESTMP: 'time',
+        TIMESTAMP: 'datetime',
         TIME: 'time',
         DATE: 'date',
 
         // Binaries
         BINARY: 'binary',
         VARBINARY: 'binary',
+        BLOB: 'binary',
+        GRAPHIC: 'binary',
+        VARGRAPHIC: 'binary',
 
         // Strings
+        CHARACTER: 'string',
         CHAR: 'string',
         VARCHAR: 'string',
-        GRAPHIC: 'string',
-        VARGRAPHIC: 'string',
 
         // Integers
         SMALLINT: 'integer',
         INTEGER: 'integer',
+        INT: 'integer',
         BIGINT: 'integer',
 
         // Floats
         DECIMAL: 'float',
+        NUMERIC: 'float',
         DECFLOAT: 'float',
         REAL: 'float',
         DOUBLE: 'float',
 
         // Texts
         CLOB: 'text',
-        BLOB: 'text',
         DBCLOB: 'text',
         XML: 'text'
     };
 
+    // maps Waterline types to DB2 types
     me.getSqlType = function (attrType) {
         var type = '';
 
@@ -123,13 +173,16 @@ module.exports = (function () {
                 type = 'DOUBLE';
                 break;
             case 'text':
-                type = 'BLOB';
+                type = 'CLOB';
                 break;
             case 'binary':
                 type = 'VARBINARY';
                 break;
+            case 'datetime':
+                type = 'TIMESTAMP';
+                break;
             case 'time':
-                type = 'TIMESTMP';
+                type = 'TIME';
                 break;
             case 'date':
                 type = 'DATE'
@@ -172,12 +225,13 @@ module.exports = (function () {
             // drop   => Drop schema and data, then recreate it
             // alter  => Drop/add columns as necessary.
             // safe   => Don't change anything (good for production DBs)
-            migrate: 'alter'
+            migrate: 'safe'
         },
 
 
         /**
          *
+         * Open DB2 connection
          * This method runs when a model is initially registered
          * at server-start-time.  This is the only required method.
          *
@@ -187,8 +241,8 @@ module.exports = (function () {
          */
         registerConnection: function (connection, collections, cb) {
             // Validate arguments
-            if (!connection.identity) return cb(WaterlineAdapterErrors.IdentityMissing);
-            if (me.connections[connection.identity]) return cb(WaterlineAdapterErrors.IdentityDuplicate);
+            if (!connection.identity) return cb(adapterErrors.IdentityMissing);
+            if (me.connections[connection.identity]) return cb(adapterErrors.IdentityDuplicate);
 
             me.connections[connection.identity] = {
                 config: connection,
@@ -202,6 +256,7 @@ module.exports = (function () {
 
 
         /**
+         * Kill DB2 connection
          * Fired when a model is unregistered, typically when the server
          * is killed. Useful for tearing-down remaining open connections,
          * etc.
@@ -226,6 +281,7 @@ module.exports = (function () {
 
         /**
          *
+         * Create a table in DB2.
          * REQUIRED method if integrating with a schemaful
          * (SQL-ish) database.
          *
@@ -237,7 +293,7 @@ module.exports = (function () {
         define: function (connectionName, collectionName, definition, cb) {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
-                query = 'CREATE TABLE ' + collectionName,
+                query = 'CREATE TABLE ' + me.formatTableName(collectionName),
                 schemaData = [],
                 schemaQuery = '';
 
@@ -245,27 +301,45 @@ module.exports = (function () {
                 var attrType = me.getSqlType(attribute.type),
                     attrQuery = attrName;
 
-                // @todo: handle unique and other DB2 data types
+                // @todo: check SYSCAT or IBMSYS to find primary keys and UNIQUE indexes
                 if (attribute.primaryKey) {
-                    if (attribute.autoIncrement) attrQuery += ' INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY';
-                    else attrQuery += ' VARCHAR(255) NOT NULL PRIMARY KEY';
-                }
-                else {
+                    if (attribute.autoIncrement) attrQuery += adapterOptions.defaultPrimaryKeyType + ' GENERATED ALWAYS AS IDENTITY PRIMARY KEY';
+                    else attrQuery += ' ' + adapterOptions.defaultPrimaryKeyType + ' NOT NULL PRIMARY KEY';
+                } else {
+                    // @todo: add type-dependent column attributes?
+                    // same default sizes as DB2
+                    var defaultLen = null;
                     switch (attrType) {
-                        case 'VARCHAR':
-                            var len = attribute.length || 255;
-                            attrQuery += ' ' + attrType + '(' + len + ')';
+                        case 'GRAPHIC':
+                        case 'CHAR':
+                        case 'CHARACTER':
+                        case 'BINARY':
+                            defaultLen = 1;
                             break;
-                        // @todo: handle each type with correct params
-                        case 'DOUBLE':
-                        case 'BLOB':
+                        case 'VARCHAR':
                         case 'VARBINARY':
-                        case 'TIMESTMP':
-                        case 'DATE':
-                        case 'INTEGER':
+                            defaultLen = 32704;
+                            break;
+                        case 'CLOB': // depends on charset; use max len
+                            defaultLen = 2147483647;
+                            break;
+                        case 'BLOB':
+                            defaultLen = 1024;
+                            break;
+                        case 'DBCLOB':
+                            defaultLen = 512;
+                            break;
                         default:
+                            // no size should or can be specified
                             attrQuery += ' ' + attrType;
                     }
+                    if (!attribute.length && defaultLen !== null) {
+                        attribute.length = defaultLen;
+                    }
+                    if (!!attribute.length) {
+                        attrQuery += ' ' + attrType + '(' + attribute.length + ')';
+                    }
+                    attrQuery += (attribute.required ? ' NOT NULL' : 'WITH DEFAULT');
                 }
 
                 schemaData.push(attrQuery);
@@ -273,10 +347,12 @@ module.exports = (function () {
             schemaQuery += '(' + schemaData.join(',') + ')';
 
             query += ' ' + schemaQuery;
+            logQuery(query);
+            
             // @todo: use DB2 Database describe method instead of a SQL Query
             return adapter.query(connectionName, collectionName, query, function (err, result) {
                 if (err) {
-                    if (err.state !== '42S01') return cb(err);
+                    if (err.state.substring(0, 1) !== '01') return cb(err);
                     result = [];
                 }
 
@@ -286,6 +362,7 @@ module.exports = (function () {
 
         /**
          *
+         * Query system tables for a table definition and creates a Waterline collection.
          * REQUIRED method if integrating with a schemaful
          * (SQL-ish) database.
          *
@@ -294,9 +371,15 @@ module.exports = (function () {
          * @return {[type]}                  [description]
          */
         describe: function (connectionName, collectionName, cb) {
+            // @todo: we should read ROWID from db, and never update it.
+            // It's more reliable than PK's because it always exists and is only 1 column.
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
-                query = 'SELECT DISTINCT(NAME), COLTYPE, IDENTITY, KEYSEQ, NULLS FROM Sysibm.syscolumns WHERE tbname = ' + me.escape(collectionName);
+                query = 'SELECT COLNAME, TYPENAME, LENGTH, NULLS, DEFAULT, IDENTITY'
+                    + ' FROM SYSCAT.COLUMNS'
+                    + ' WHERE TABSCHEMA = (CURRENT SCHEMA) AND TABNAME = ' + me.escape(collectionName)
+                    + ' ORDER BY COLNO';
+            logQuery(query);
 
             // @todo: use DB2 Database describe method instead of a SQL Query
             adapter.query(connectionName, collectionName, query, function (err, attrs) {
@@ -308,16 +391,19 @@ module.exports = (function () {
                 // @todo: check out a better solution to define primary keys following db2 docs
                 attrs.forEach(function (attr) {
                     var attribute = {
-                        type: me.typeMap[attr.COLTYPE.trim()]
+                        type: me.typeMap[attr.TYPENAME.trim()],
+                        maxLength: attr.LENGTH,
+                        required: ((isNaN(attr.DEFAULT) || attr.DEFAULT === 0) && attr.NULLS === 'N')
                     };
 
-                    if (attr.IDENTITY === 'Y' && attr.KEYSEQ !== 0 && attr.NULLS === 'N' && attribute.type === 'integer') {
+                    // @todo: handle multi-column keys
+                    if (attr.IDENTITY === 'Y') {
                         attribute.primaryKey = true;
                         attribute.autoIncrement = true;
                         attribute.unique = true;
                     }
 
-                    attributes[attr.NAME] = attribute;
+                    attributes[attr.COLNAME] = attribute;
                 });
 
                 cb(null, attributes);
@@ -327,7 +413,7 @@ module.exports = (function () {
 
         /**
          *
-         *
+         * DROP TABLE
          * REQUIRED method if integrating with a schemaful
          * (SQL-ish) database.
          *
@@ -347,26 +433,26 @@ module.exports = (function () {
                 __DROP__ = function () {
                     // Drop any relations
                     var dropTable = function (tableName, next) {
-                            // Build query
-                            var query = 'DROP TABLE ' + tableName;
+                        // Build query
+                        var query = 'DROP TABLE ' + me.formatTableName(tableName);
 
-                            // Run query
-                            connection.conn.query(query, next);
-                        },
-                        passCallback = function (err, result) {
-                            if (err) {
-                                if (err.state !== '42S02') return cb(err);
-                                result = [];
-                            }
-                            cb(null, result);
-                        };
+                        // Run query
+                        connection.conn.query(query, next);
+                    },
+                    passCallback = function (err, result) {
+                        if (err) {
+                            if (err.state.substring(0, 1) !== '01') return cb(err);
+                            result = [];
+                        }
+                        cb(null, result);
+                    };
 
                     async.eachSeries(relations, dropTable, function(err) {
                         if (err) return cb(err);
-
                         return dropTable(collectionName, passCallback);
                     });
 
+                    logQuery(query);
                     connection.conn.query('DROP TABLE ' + collectionName, relations, passCallback);
                 },
                 operationCallback = function (err, conn) {
@@ -401,16 +487,23 @@ module.exports = (function () {
                 connectionString = me.getConnectionString(connection),
                 __QUERY__ = function () {
                     var callback = function (err, records) {
-                        if (err) cb(err);
-                        else cb(null, records);
+                        if (err) {
+                            cb(err);
+                        } else {
+                            // lack of error could be enough,
+                            // but i prefer to be sure that the query has been issued
+                            cb(null, records);
+                        }
                     };
 
+                    // with or without parameters (WHERE x = ?)
                     if (data) connection.conn.query(query, data, callback);
-                    else connection.conn.query(query, callback);
+                    else      connection.conn.query(query, callback);
                 },
                 operationCallback = function (err, conn) {
-                    if (err) return cb(err);
-                    else {
+                    if (err) {
+                            cb(err);
+                    } else {
                         connection.conn = conn;
                         return __QUERY__();
                     }
@@ -420,8 +513,10 @@ module.exports = (function () {
             else return db2.open(connectionString, operationCallback);
         },
 
-
         /**
+         *
+         * SELECT
+         * options: objects representing various SELECT clauses.
          *
          * REQUIRED method if users expect to call Model.find(), Model.findOne(),
          * or related.
@@ -439,9 +534,13 @@ module.exports = (function () {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
+                // @todo: fields, groupBy, having, count, sum, min, max, average, median, stddev, variance, covariance
                 __FIND__ = function () {
-                    var selectQuery = 'SELECT ' + me.getSelectAttributes(collection),
-                        fromQuery = ' FROM ' + collection.tableName,
+                    var selectClause = (typeof options.select !== 'undefined')
+                            ? options.select.join(',') : me.getSelectAttributes(collection),
+                        distinctOption = (options.distinct == true)
+                                ? 'DISTINCT ' : '',
+                        fromQuery = ' FROM ' + me.formatTableName(collection.tableName),
                         whereData = [],
                         whereQuery = '',
                         limitQuery = options.limit ? ' LIMIT ' + options.limit : '',
@@ -451,6 +550,11 @@ module.exports = (function () {
                         params = [],
                         sqlQuery = '';
 
+                    // validate query
+                    if (options.skip && !options.limit) {
+                        throw new Error('Cannot specify .skip without .limit');
+                    }
+                    
                     // Building where clause
                     _.each(options.where, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
@@ -458,21 +562,21 @@ module.exports = (function () {
                             params.push(param);
                         }
                     });
-                    whereQuery += whereData.join(' AND ');
-                    if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
+                    if (whereData.length > 0) whereQuery = ' WHERE ' + whereData.join(' AND ');
 
                     // Building sort clause
                     _.each(options.sort, function (direction, column) {
                         if (collection.definition.hasOwnProperty(column)) {
-                            //ORDER BY APPLICATIONCODE DESC
-
+                            // {colName: 'DESC'} -> ORDER BY <col_name> [ASC | DESC]
                             sortData.push(column + ' ' + direction);
                         }
                     });
-                    sortQuery += sortData.join(', ');
-                    if (sortQuery.length > 0) sortQuery = ' ORDER BY ' + sortQuery;
+                    if (sortData.length > 0) sortQuery = ' ORDER BY ' + sortData.join(', ');
 
-                    sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery + skipQuery;
+                    // assemble clauses
+                    sqlQuery = 'SELECT ' + distinctOption + selectClause + fromQuery
+                        + whereQuery + sortQuery + limitQuery + skipQuery;
+                    logQuery(sqlQuery);
                     connection.conn.query(sqlQuery, params, cb);
 
                     // Options object is normalized for you:
@@ -500,6 +604,35 @@ module.exports = (function () {
 
         /**
          *
+         * SELECT - 1 row
+         *
+         * @param  {[type]}   collectionName [description]
+         * @param  {[type]}   options        [description]
+         * @param  {Function} cb             [description]
+         * @return {[type]}                  [description]
+         */
+        findOne: function (connectionName, collectionName, options, cb) {
+            options.limit = 1;
+            return this.find(connectionName, collectionName, options, cb);
+        },
+
+        /**
+         *
+         * SELECT COUNT(*)
+         *
+         * @param  {[type]}   collectionName [description]
+         * @param  {[type]}   options        [description]
+         * @param  {Function} cb             [description]
+         * @return {[type]}                  [description]
+         */
+        count: function (connectionName, collectionName, options, cb) {
+            options.select = ['COUNT(*)'];
+            return this.find(connectionName, collectionName, options, cb);
+        },
+
+        /**
+         *
+         * INSERT
          * REQUIRED method if users expect to call Model.create() or any methods
          *
          * @param  {[type]}   collectionName [description]
@@ -512,12 +645,16 @@ module.exports = (function () {
                 collection = connection.collections[collectionName],
                 connectionString = me.getConnectionString(connection),
                 __CREATE__ = function () {
-                    var selectQuery = me.getSelectAttributes(collection),
+                    var
+                        // in case ORM columns are a subset of DB2 columns
+                        selectQuery = me.getSelectAttributes(collection),
+                        query = '',
                         columns = [],
                         params = [],
                         questions = [];
 
                     _.each(values, function (param, column) {
+                        // INTO and VALUES clauses, with ? placeholders
                         if (collection.definition.hasOwnProperty(column)) {
                             columns.push(column);
                             params.push(param);
@@ -525,9 +662,14 @@ module.exports = (function () {
                         }
                     });
 
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM NEW TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
-                        if (err) cb(err);
-                        else cb(null, results[0]);
+                    query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + me.formatTableName(collection.tableName) + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))';
+                    logQuery(query);
+                    connection.conn.query(query, params, function (err, results) {
+                        if (err) {
+                            cb(err);
+                        } else {
+                            cb(null, results[0]);
+                        }
                     });
                 },
                 operationCallback = function (err, conn) {
@@ -542,9 +684,10 @@ module.exports = (function () {
             else return db2.open(connectionString, operationCallback);
         },
 
+
         /**
          *
-         *
+         * UPDATE
          * REQUIRED method if users expect to call Model.update()
          *
          * @param  {[type]}   collectionName [description]
@@ -563,7 +706,8 @@ module.exports = (function () {
                         setQuery = '',
                         whereData = [],
                         whereQuery = '',
-                        params = [];
+                        params = [],
+                        query = '';
 
                     _.each(values, function (param, column) {
                         if (collection.definition.hasOwnProperty(column) && !collection.definition[column].autoIncrement) {
@@ -579,11 +723,16 @@ module.exports = (function () {
                             params.push(param);
                         }
                     });
-                    whereQuery += whereData.join(' AND ');
+                    whereQuery = whereData.join(' AND ');
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM NEW TABLE (UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + ')', params, function (err, results) {
+                    query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE ('
+                        + 'UPDATE ' + me.formatTableName(collection.tableName)
+                        + ' SET ' + setQuery + whereQuery + getFetchOnly(options.limit)
+                        + ')';
+                    logQuery(query);
+                    connection.conn.query(query, params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
@@ -602,6 +751,7 @@ module.exports = (function () {
 
         /**
          *
+         * DELETE
          * REQUIRED method if users expect to call Model.destroy()
          *
          * @param  {[type]}   collectionName [description]
@@ -616,7 +766,8 @@ module.exports = (function () {
                 __DESTROY__ = function () {
                     var whereData = [],
                         whereQuery = '',
-                        params = [];
+                        params = [],
+                        query = '';
 
                     _.each(options.where, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
@@ -628,11 +779,14 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('DELETE FROM ' + collection.tableName + whereQuery, params, cb);
+                    query = 'DELETE FROM ' + me.formatTableName(collection.tableName) + whereQuery + getFetchOnly(options.limit);
+                    logQuery(query);
+                    connection.conn.query(query, params, cb);
                 },
                 operationCallback = function (err, conn) {
-                    if (err) return cb(err);
-                    else {
+                    if (err) {
+                        return cb(err);
+                    } else {
                         connection.conn = conn;
                         return __DESTROY__();
                     }
@@ -640,7 +794,40 @@ module.exports = (function () {
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
+        },
+
+
+        /**
+         *
+         * TRUNCATE TABLE IMMEDIATE
+         * No options!!
+         *
+         * @param  {[type]}   collectionName [description]
+         * @param  {Function} cb             [description]
+         * @return {[type]}                  [description]
+         */
+        truncate: function (connectionName, collectionName, cb) {
+            var connection = me.connections[connectionName],
+                collection = connection.collections[collectionName],
+                connectionString = me.getConnectionString(connection),
+                __TRUNCATE__ = function () {
+                    var query = 'TRUNCATE TABLE ' + me.formatTableName(collection.tableName) + ' IMMEDIATE';
+                    logQuery(query);
+                    connection.conn.query(query, [], cb);
+                },
+                operationCallback = function (err, conn) {
+                    if (err) {
+                        return cb(err);
+                    } else {
+                        connection.conn = conn;
+                        return __TRUNCATE__();
+                    }
+                };
+
+            if (connection.pool) return connection.pool.open(connectionString, operationCallback);
+            else return db2.open(connectionString, operationCallback);
         }
+
 
 
         /*
@@ -731,11 +918,13 @@ module.exports = (function () {
 
 
          */
-
-
     };
 
 
     // Expose adapter definition
     return adapter;
-})();
+});
+
+module.exports = function (adapterOptions) {
+    return modul(adapterOptions);
+};
