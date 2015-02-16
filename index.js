@@ -4,7 +4,7 @@
 var async = require('async'),
     _ = require('lodash'),
     db2 = require('ibm_db'),
-    WaterlineAdapterErrors = require('waterline-errors').adapter;
+    adapterErrors = require('waterline-errors').adapter;
 
 /**
  * Sails Boilerplate Adapter
@@ -20,9 +20,27 @@ var async = require('async'),
  * If you do go that route, it's conventional in Node to create a `./lib` directory for your private submodules
  * and load them at the top of the file with other dependencies.  e.g. var update = `require('./lib/update')`;
  */
-module.exports = (function () {
-    var me = this,
-        debug = false;
+var modul = (function (adapterOptions) {
+    var me = this;
+
+    // default options
+    var defaultAdapterOptions = {
+        // quoting table names makes them case-sensitive
+        quoteTableNames: false,
+        // default type for PK columns
+        defaultPrimaryKeyType: 'INTEGER',
+        // logger function or null
+        logger: null
+    };
+    if (_.isUndefined(adapterOptions)) {
+        adapterOptions = {};
+    }
+    _.forOwn(defaultAdapterOptions, function (val, key) {
+        if (_.isUndefined(adapterOptions[key])) {
+            adapterOptions[key] = val;
+        }
+    });
+
 
     // You'll want to maintain a reference to each collection
     // (aka model) that gets registered with this adapter.
@@ -69,30 +87,26 @@ module.exports = (function () {
         return connectionData.join(';');
     };
 
+
     me.escape = function (word) {
         return "'" + word.replace("'", "''") + "'";
     };
 
-    var logAction = function (funcName, action, param1) {
-        if (debug !== true) return null;
 
-        switch (action) {
-            case 'SQL':
-                dbgString = funcName + ' will execute: ' + param1;
-                break;
-            case 'OPEN':
-                dbgString = 'Opening Connection';
-                break;
-            case 'CLOSE':
-                dbgString = 'Closing Connection';
-                break;
-            case 'MSG':
-                dbgString = param1;
-            default:
-                dbgString = '!! BUG IN DEBUG CODE !!';
-        }
-        console.log(dbgString);
+    me.formatTableName = function (tableName) {
+        return adapterOptions.quoteTableNames
+             ? '"' + tableName.replace('"', '""') + '"'
+            : tableName;
     };
+
+
+    var logQuery = function (query) {
+        if (typeof adapterOptions.logger === 'function') {
+            adapterOptions.logger(query);
+        }
+        return query;
+    };
+
 
     // returns FETCH ONLY clause; use this for non-SELECT statements
     var getFetchOnly = function(rowsNumber) {
@@ -102,6 +116,7 @@ module.exports = (function () {
             return '';
         }
     };
+
 
     // map DB2 types to Waterline types
     // Waterline source: https://www.npmjs.org/package/waterline#attributes
@@ -225,11 +240,9 @@ module.exports = (function () {
          * @return {[type]}              [description]
          */
         registerConnection: function (connection, collections, cb) {
-            logAction('registerConnection', 'OPEN');
-            
             // Validate arguments
-            if (!connection.identity) return cb(WaterlineAdapterErrors.IdentityMissing);
-            if (me.connections[connection.identity]) return cb(WaterlineAdapterErrors.IdentityDuplicate);
+            if (!connection.identity) return cb(adapterErrors.IdentityMissing);
+            if (me.connections[connection.identity]) return cb(adapterErrors.IdentityDuplicate);
 
             me.connections[connection.identity] = {
                 config: connection,
@@ -252,8 +265,6 @@ module.exports = (function () {
          * @return {[type]}      [description]
          */
         teardown: function (connectionName, cb) {
-            logAction('teardown', 'CLOSE');
-            
             var closeConnection = function (connectionName) {
                 var connection = me.connections[connectionName];
                 if (connection.conn) connection.conn.close();
@@ -282,7 +293,7 @@ module.exports = (function () {
         define: function (connectionName, collectionName, definition, cb) {
             var connection = me.connections[connectionName],
                 collection = connection.collections[collectionName],
-                query = 'CREATE TABLE ' + collectionName,
+                query = 'CREATE TABLE ' + me.formatTableName(collectionName),
                 schemaData = [],
                 schemaQuery = '';
 
@@ -292,10 +303,9 @@ module.exports = (function () {
 
                 // @todo: check SYSCAT or IBMSYS to find primary keys and UNIQUE indexes
                 if (attribute.primaryKey) {
-                    if (attribute.autoIncrement) attrQuery += ' INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY';
-                    else attrQuery += ' INTEGER NOT NULL PRIMARY KEY';
-                }
-                else {
+                    if (attribute.autoIncrement) attrQuery += adapterOptions.defaultPrimaryKeyType + ' GENERATED ALWAYS AS IDENTITY PRIMARY KEY';
+                    else attrQuery += ' ' + adapterOptions.defaultPrimaryKeyType + ' NOT NULL PRIMARY KEY';
+                } else {
                     // @todo: add type-dependent column attributes?
                     // same default sizes as DB2
                     var defaultLen = null;
@@ -337,7 +347,7 @@ module.exports = (function () {
             schemaQuery += '(' + schemaData.join(',') + ')';
 
             query += ' ' + schemaQuery;
-            logAction('define', 'SQL', query);
+            logQuery(query);
             
             // @todo: use DB2 Database describe method instead of a SQL Query
             return adapter.query(connectionName, collectionName, query, function (err, result) {
@@ -369,7 +379,7 @@ module.exports = (function () {
                     + ' FROM SYSCAT.COLUMNS'
                     + ' WHERE TABSCHEMA = (CURRENT SCHEMA) AND TABNAME = ' + me.escape(collectionName)
                     + ' ORDER BY COLNO';
-                logAction('describe', 'SQL', query);
+            logQuery(query);
 
             // @todo: use DB2 Database describe method instead of a SQL Query
             adapter.query(connectionName, collectionName, query, function (err, attrs) {
@@ -424,7 +434,7 @@ module.exports = (function () {
                     // Drop any relations
                     var dropTable = function (tableName, next) {
                         // Build query
-                        var query = 'DROP TABLE ' + tableName;
+                        var query = 'DROP TABLE ' + me.formatTableName(tableName);
 
                         // Run query
                         connection.conn.query(query, next);
@@ -442,7 +452,7 @@ module.exports = (function () {
                         return dropTable(collectionName, passCallback);
                     });
 
-                    logAction('drop', 'SQL', query);
+                    logQuery(query);
                     connection.conn.query('DROP TABLE ' + collectionName, relations, passCallback);
                 },
                 operationCallback = function (err, conn) {
@@ -478,12 +488,10 @@ module.exports = (function () {
                 __QUERY__ = function () {
                     var callback = function (err, records) {
                         if (err) {
-                            logAction('query', 'MSG', 'ERROR In Query');
                             cb(err);
                         } else {
                             // lack of error could be enough,
                             // but i prefer to be sure that the query has been issued
-                            logAction('query', 'MSG', 'Query OK');
                             cb(null, records);
                         }
                     };
@@ -494,7 +502,6 @@ module.exports = (function () {
                 },
                 operationCallback = function (err, conn) {
                     if (err) {
-                            logAction('query', 'MSG', 'ERROR: Query Not Sent');
                             cb(err);
                     } else {
                         connection.conn = conn;
@@ -529,8 +536,11 @@ module.exports = (function () {
                 connectionString = me.getConnectionString(connection),
                 // @todo: fields, groupBy, having, count, sum, min, max, average, median, stddev, variance, covariance
                 __FIND__ = function () {
-                    var selectQuery = 'SELECT ' + me.getSelectAttributes(collection),
-                        fromQuery = ' FROM ' + collection.tableName,
+                    var selectClause = (typeof options.select !== 'undefined')
+                            ? options.select.join(',') : me.getSelectAttributes(collection),
+                        distinctOption = (options.distinct == true)
+                                ? 'DISTINCT ' : '',
+                        fromQuery = ' FROM ' + me.formatTableName(collection.tableName),
                         whereData = [],
                         whereQuery = '',
                         limitQuery = options.limit ? ' LIMIT ' + options.limit : '',
@@ -564,8 +574,9 @@ module.exports = (function () {
                     if (sortData.length > 0) sortQuery = ' ORDER BY ' + sortData.join(', ');
 
                     // assemble clauses
-                    sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery + skipQuery;
-                    logAction('find', 'SQL', sqlQuery);
+                    sqlQuery = 'SELECT ' + distinctOption + selectClause + fromQuery
+                        + whereQuery + sortQuery + limitQuery + skipQuery;
+                    logQuery(sqlQuery);
                     connection.conn.query(sqlQuery, params, cb);
 
                     // Options object is normalized for you:
@@ -589,6 +600,34 @@ module.exports = (function () {
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
+        },
+
+        /**
+         *
+         * SELECT - 1 row
+         *
+         * @param  {[type]}   collectionName [description]
+         * @param  {[type]}   options        [description]
+         * @param  {Function} cb             [description]
+         * @return {[type]}                  [description]
+         */
+        findOne: function (connectionName, collectionName, options, cb) {
+            options.limit = 1;
+            return this.find(connectionName, collectionName, options, cb);
+        },
+
+        /**
+         *
+         * SELECT COUNT(*)
+         *
+         * @param  {[type]}   collectionName [description]
+         * @param  {[type]}   options        [description]
+         * @param  {Function} cb             [description]
+         * @return {[type]}                  [description]
+         */
+        count: function (connectionName, collectionName, options, cb) {
+            options.select = ['COUNT(*)'];
+            return this.find(connectionName, collectionName, options, cb);
         },
 
         /**
@@ -623,11 +662,14 @@ module.exports = (function () {
                         }
                     });
 
-                    query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))';
-                    logAction('create', 'SQL', query);
+                    query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + me.formatTableName(collection.tableName) + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))';
+                    logQuery(query);
                     connection.conn.query(query, params, function (err, results) {
-                        if (err) cb(err);
-                        else cb(null, results[0]);
+                        if (err) {
+                            cb(err);
+                        } else {
+                            cb(null, results[0]);
+                        }
                     });
                 },
                 operationCallback = function (err, conn) {
@@ -641,6 +683,7 @@ module.exports = (function () {
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
         },
+
 
         /**
          *
@@ -685,9 +728,10 @@ module.exports = (function () {
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
                     query = 'SELECT ' + selectQuery + ' FROM FINAL TABLE ('
-                        + 'UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + getFetchOnly(options.limit)
+                        + 'UPDATE ' + me.formatTableName(collection.tableName)
+                        + ' SET ' + setQuery + whereQuery + getFetchOnly(options.limit)
                         + ')';
-                    logAction('update', 'SQL', query);
+                    logQuery(query);
                     connection.conn.query(query, params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
@@ -735,14 +779,14 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    // dont store anything?
-                    query = 'DELETE FROM ' + collection.tableName + whereQuery + getFetchOnly(options.limit);
-                    logAction('update', 'SQL', query);
+                    query = 'DELETE FROM ' + me.formatTableName(collection.tableName) + whereQuery + getFetchOnly(options.limit);
+                    logQuery(query);
                     connection.conn.query(query, params, cb);
                 },
                 operationCallback = function (err, conn) {
-                    if (err) return cb(err);
-                    else {
+                    if (err) {
+                        return cb(err);
+                    } else {
                         connection.conn = conn;
                         return __DESTROY__();
                     }
@@ -750,7 +794,40 @@ module.exports = (function () {
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
+        },
+
+
+        /**
+         *
+         * TRUNCATE TABLE IMMEDIATE
+         * No options!!
+         *
+         * @param  {[type]}   collectionName [description]
+         * @param  {Function} cb             [description]
+         * @return {[type]}                  [description]
+         */
+        truncate: function (connectionName, collectionName, cb) {
+            var connection = me.connections[connectionName],
+                collection = connection.collections[collectionName],
+                connectionString = me.getConnectionString(connection),
+                __TRUNCATE__ = function () {
+                    var query = 'TRUNCATE TABLE ' + me.formatTableName(collection.tableName) + ' IMMEDIATE';
+                    logQuery(query);
+                    connection.conn.query(query, [], cb);
+                },
+                operationCallback = function (err, conn) {
+                    if (err) {
+                        return cb(err);
+                    } else {
+                        connection.conn = conn;
+                        return __TRUNCATE__();
+                    }
+                };
+
+            if (connection.pool) return connection.pool.open(connectionString, operationCallback);
+            else return db2.open(connectionString, operationCallback);
         }
+
 
 
         /*
@@ -841,11 +918,13 @@ module.exports = (function () {
 
 
          */
-
-
     };
 
 
     // Expose adapter definition
     return adapter;
-})();
+});
+
+module.exports = function (adapterOptions) {
+    return modul(adapterOptions);
+};
