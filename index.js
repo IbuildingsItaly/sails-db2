@@ -444,8 +444,7 @@ module.exports = (function () {
                         fromQuery = ' FROM ' + collection.tableName,
                         whereData = [],
                         whereQuery = '',
-                        limitQuery = options.limit ? ' LIMIT ' + options.limit : '',
-                        skipQuery = options.skip ? ' OFFSET ' + options.skip : '',
+                        limitQuery = !_.isEmpty(options.limit) ? ' FETCH FIRST ' + options.limit + ' ROWS ONLY ' : '',
                         sortData = [],
                         sortQuery = '',
                         params = [],
@@ -472,14 +471,13 @@ module.exports = (function () {
                     sortQuery += sortData.join(', ');
                     if (sortQuery.length > 0) sortQuery = ' ORDER BY ' + sortQuery;
 
-                    sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery + skipQuery;
+                    sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery;
                     connection.conn.query(sqlQuery, params, cb);
 
                     // Options object is normalized for you:
                     //
                     // options.where
                     // options.limit
-                    // options.skip
                     // options.sort
 
                     // Filter, paginate, and sort records from the datastore.
@@ -525,7 +523,7 @@ module.exports = (function () {
                         }
                     });
 
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM NEW TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
+                    connection.conn.query('SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
@@ -563,7 +561,8 @@ module.exports = (function () {
                         setQuery = '',
                         whereData = [],
                         whereQuery = '',
-                        params = [];
+                        params = [],
+                        sqlQuery = '';
 
                     _.each(values, function (param, column) {
                         if (collection.definition.hasOwnProperty(column) && !collection.definition[column].autoIncrement) {
@@ -571,7 +570,7 @@ module.exports = (function () {
                             params.push(param);
                         }
                     });
-                    setQuery += setData.join(',');
+                    setQuery = ' SET ' + setData.join(',');
 
                     _.each(options.where, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
@@ -583,7 +582,9 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM NEW TABLE (UPDATE ' + collection.tableName + ' SET ' + setQuery + whereQuery + ')', params, function (err, results) {
+                    sqlQuery = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (UPDATE ' + collection.tableName + setQuery + whereQuery + ')';
+
+                    connection.conn.query(sqlQuery, params, function (err, results) {
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
