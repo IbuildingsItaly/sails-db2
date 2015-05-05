@@ -132,7 +132,7 @@ module.exports = (function () {
                 type = 'TIMESTMP';
                 break;
             case 'date':
-                type = 'DATE'
+                type = 'DATE';
                 break;
         }
 
@@ -189,6 +189,9 @@ module.exports = (function () {
             // Validate arguments
             if (!connection.identity) return cb(WaterlineAdapterErrors.IdentityMissing);
             if (me.connections[connection.identity]) return cb(WaterlineAdapterErrors.IdentityDuplicate);
+
+            var host = connection.host;
+            if (host && typeof host === 'string' && host.search(':') !== -1) connection.host = host.split(':')[0];
 
             me.connections[connection.identity] = {
                 config: connection,
@@ -405,7 +408,7 @@ module.exports = (function () {
                         else cb(null, records);
                     };
 
-                    if (data) connection.conn.query(query, data, callback);
+                    if (_.isArray(data) && data.length > 0) connection.conn.query(query, data, callback);
                     else connection.conn.query(query, callback);
                 },
                 operationCallback = function (err, conn) {
@@ -452,9 +455,21 @@ module.exports = (function () {
 
                     // Building where clause
                     _.each(options.where, function (param, column) {
-                        if (collection.definition.hasOwnProperty(column)) {
-                            whereData.push(column + ' = ?');
-                            params.push(param);
+                        if (_.isArray(param)) {
+                            var whereArr = [];
+                            param.forEach(function (val) {
+                                whereArr.push(column + ' = ?');
+                                if (collection.definition[column].type === 'boolean') params.push(val === true ? 1 : 0);
+                                else params.push(val);
+                            });
+                            whereData.push('(' + whereArr.join(' OR ') + ')');
+                        }
+                        else {
+                            if (collection.definition.hasOwnProperty(column)) {
+                                whereData.push(column + ' = ?');
+                                if (collection.definition[column].type === 'boolean') params.push(param === true ? 1 : 0);
+                                else params.push(param);
+                            }
                         }
                     });
                     whereQuery += whereData.join(' AND ');
@@ -518,7 +533,8 @@ module.exports = (function () {
                     _.each(values, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
                             columns.push(column);
-                            params.push(param);
+                            if (collection.definition[column].type === 'boolean') params.push(param === true ? 1 : 0);
+                            else params.push(param);
                             questions.push('?');
                         }
                     });
@@ -567,7 +583,8 @@ module.exports = (function () {
                     _.each(values, function (param, column) {
                         if (collection.definition.hasOwnProperty(column) && !collection.definition[column].autoIncrement) {
                             setData.push(column + ' = ?');
-                            params.push(param);
+                            if (collection.definition[column].type === 'boolean') params.push(param === true ? 1 : 0);
+                            else params.push(param);
                         }
                     });
                     setQuery = ' SET ' + setData.join(',');
@@ -575,7 +592,8 @@ module.exports = (function () {
                     _.each(options.where, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
                             whereData.push(column + ' = ?');
-                            params.push(param);
+                            if (collection.definition[column].type === 'boolean') params.push(param === true ? 1 : 0);
+                            else params.push(param);
                         }
                     });
                     whereQuery += whereData.join(' AND ');
@@ -622,7 +640,8 @@ module.exports = (function () {
                     _.each(options.where, function (param, column) {
                         if (collection.definition.hasOwnProperty(column)) {
                             whereData.push(column + ' = ?');
-                            params.push(param);
+                            if (collection.definition[column].type === 'boolean') params.push(param === true ? 1 : 0);
+                            else params.push(param);
                         }
                     });
                     whereQuery += whereData.join(' AND ');
