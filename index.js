@@ -221,9 +221,15 @@ module.exports = (function () {
         teardown: function (connectionName, cb) {
             var closeConnection = function (connectionName) {
                 var connection = me.connections[connectionName];
-                if (connection.conn) connection.conn.close(function (err) {
-                    if (err) console.error(err);
-                });
+                if(connection)
+				    if (connection.conn && typeof connection.conn.close == 'function') 
+				        connection.conn.close(function (err) {
+                            if (err) console.error(err);
+                        });
+				    else
+				        connection.close(function (err) {
+                            if (err) console.error(err);
+                        });
 
                 delete me.connections[connectionName];
             };
