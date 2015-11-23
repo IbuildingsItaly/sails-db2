@@ -222,12 +222,12 @@ module.exports = (function () {
             var closeConnection = function (connectionName) {
                 var connection = me.connections[connectionName];
                 if(connection)
-				    if (connection.conn && typeof connection.conn.close == 'function') 
-				        connection.conn.close(function (err) {
+		    if (connection.conn && typeof connection.conn.close == 'function') 
+		        connection.conn.close(function (err) {
                             if (err) console.error(err);
                         });
-				    else
-				        connection.close(function (err) {
+		    else
+		        connection.close(function (err) {
                             if (err) console.error(err);
                         });
 
