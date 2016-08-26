@@ -27,7 +27,8 @@ module.exports.adapters = {
     port     : 50000,
     user     : 'username',
     password : 'password',
-    database : 'DB2 Database Name'
+    database : 'DB2 Database Name',
+    schemaDB2: 'my_schema'
   }
 };
 ```

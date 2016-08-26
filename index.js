@@ -149,6 +149,12 @@ module.exports = (function () {
         });
     };
 
+    me.getTableName = function (tableName, schema) {
+        var result = tableName;
+        if (typeof schema === 'string' && schema.length > 0) result = ' ' + schema + '.' + tableName + ' ';
+        return result;
+    };
+
     var adapter = {
         identity: 'sails-db2',
 
@@ -198,6 +204,8 @@ module.exports = (function () {
 
             var host = connection.host;
             if (host && typeof host === 'string' && host.search(':') !== -1) connection.host = host.split(':')[0];
+
+            connection.schemaDB2 = connection.schemaDB2 || connection.user;
 
             me.connections[connection.identity] = {
                 config: connection,
@@ -368,7 +376,7 @@ module.exports = (function () {
                     // Drop any relations
                     var dropTable = function (tableName, next) {
                             // Build query
-                            var query = 'DROP TABLE ' + tableName;
+                            var query = 'DROP TABLE ' + me.getTableName(tableName, connection.config.schemaDB2);
 
                             // Run query
                             openConnection.query(query, next);
@@ -463,7 +471,7 @@ module.exports = (function () {
                 connectionString = me.getConnectionString(connection),
                 __FIND__ = function () {
                     var selectQuery = 'SELECT ' + me.getSelectAttributes(collection),
-                        fromQuery = ' FROM ' + collection.tableName,
+                        fromQuery = ' FROM ' + me.getTableName(collection.tableName, connection.config.schemaDB2),
                         whereData = [],
                         whereQuery = '',
                         limitQuery = !_.isEmpty(options.limit) ? ' FETCH FIRST ' + options.limit + ' ROWS ONLY ' : '',
@@ -562,7 +570,7 @@ module.exports = (function () {
                         }
                     });
 
-                    openConnection.query('SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
+                    openConnection.query('SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + me.getTableName(collection.tableName, connection.config.schemaDB2) + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
                         me.closeConnection(openConnection);
                         if (err) cb(err);
                         else cb(null, results[0]);
@@ -624,7 +632,7 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    sqlQuery = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (UPDATE ' + collection.tableName + setQuery + whereQuery + ')';
+                    sqlQuery = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (UPDATE ' + me.getTableName(collection.tableName, connection.config.schemaDB2) + setQuery + whereQuery + ')';
 
                     openConnection.query(sqlQuery, params, function (err, results) {
                         me.closeConnection(openConnection);
@@ -673,7 +681,7 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    openConnection.query('DELETE FROM ' + collection.tableName + whereQuery, params, function (err, result) {
+                    openConnection.query('DELETE FROM ' + me.getTableName(collection.tableName, connection.config.schemaDB2) + whereQuery, params, function (err, result) {
                         me.closeConnection(openConnection);
                         if (err) return cb(err);
                         cb(null, result);
