@@ -58,10 +58,10 @@ module.exports = (function () {
         var connectionData = [
             'DRIVER={DB2}',
             'DATABASE=' + connection.config.database,
-            'HOSTNAME=' +  connection.config.host,
-            'UID=' +  connection.config.user,
-            'PWD=' +  connection.config.password,
-            'PORT=' +  connection.config.port,
+            'HOSTNAME=' + connection.config.host,
+            'UID=' + connection.config.user,
+            'PWD=' + connection.config.password,
+            'PORT=' + connection.config.port,
             'PROTOCOL=TCPIP'
         ];
 
@@ -221,15 +221,18 @@ module.exports = (function () {
         teardown: function (connectionName, cb) {
             var closeConnection = function (connectionName) {
                 var connection = me.connections[connectionName];
-                if(connection)
-		    if (connection.conn && typeof connection.conn.close == 'function') 
-		        connection.conn.close(function (err) {
+                if (connection) {
+                    if (connection.conn && typeof connection.conn.close === 'function') {
+                        connection.conn.close(function (err) {
                             if (err) console.error(err);
                         });
-		    else
-		        connection.close(function (err) {
+                    }
+                    else {
+                        connection.close(function (err) {
                             if (err) console.error(err);
                         });
+                    }
+                }
 
                 delete me.connections[connectionName];
             };
@@ -368,10 +371,10 @@ module.exports = (function () {
                             var query = 'DROP TABLE ' + tableName;
 
                             // Run query
-                            connection.conn.query(query, next);
+                            openConnection.query(query, next);
                         },
                         passCallback = function (err, result) {
-                            me.closeConnection(connection.conn);
+                            me.closeConnection(openConnection);
                             if (err) {
                                 if (err.state !== '42S02') return cb(err);
                                 result = [];
@@ -379,20 +382,21 @@ module.exports = (function () {
                             cb(null, result);
                         };
 
-                    async.eachSeries(relations, dropTable, function(err) {
+                    async.eachSeries(relations, dropTable, function (err) {
                         if (err) return cb(err);
 
                         return dropTable(collectionName, passCallback);
                     });
 
-                    connection.conn.query('DROP TABLE ' + collectionName, relations, passCallback);
+                    openConnection.query('DROP TABLE ' + collectionName, relations, passCallback);
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
 
-                    connection.conn = conn;
+                    openConnection = conn;
                     return __DROP__();
-                };
+                },
+                openConnection;
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
@@ -418,20 +422,21 @@ module.exports = (function () {
                 connectionString = me.getConnectionString(connection),
                 __QUERY__ = function () {
                     var callback = function (err, records) {
-                        me.closeConnection(connection.conn);
+                        me.closeConnection(openConnection);
                         if (err) return cb(err);
                         cb(null, records);
                     };
 
-                    if (_.isArray(data) && data.length > 0) connection.conn.query(query, data, callback);
-                    else connection.conn.query(query, callback);
+                    if (_.isArray(data) && data.length > 0) openConnection.query(query, data, callback);
+                    else openConnection.query(query, callback);
                 },
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
 
-                    connection.conn = conn;
+                    openConnection = conn;
                     return __QUERY__();
-                };
+                },
+                openConnection;
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
@@ -501,8 +506,8 @@ module.exports = (function () {
                     if (sortQuery.length > 0) sortQuery = ' ORDER BY ' + sortQuery;
 
                     sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery;
-                    connection.conn.query(sqlQuery, params, function (err, result) {
-                        me.closeConnection(connection.conn);
+                    openConnection.query(sqlQuery, params, function (err, result) {
+                        me.closeConnection(openConnection);
                         if (err) return cb(err);
                         cb(null, result);
                     });
@@ -520,9 +525,10 @@ module.exports = (function () {
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
 
-                    connection.conn = conn;
+                    openConnection = conn;
                     return __FIND__();
-                };
+                },
+                openConnection;
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
@@ -556,8 +562,8 @@ module.exports = (function () {
                         }
                     });
 
-                    connection.conn.query('SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
-                        me.closeConnection(connection.conn);
+                    openConnection.query('SELECT ' + selectQuery + ' FROM FINAL TABLE (INSERT INTO ' + collection.tableName + ' (' + columns.join(',') + ') VALUES (' + questions.join(',') + '))', params, function (err, results) {
+                        me.closeConnection(openConnection);
                         if (err) cb(err);
                         else cb(null, results[0]);
                     });
@@ -565,10 +571,10 @@ module.exports = (function () {
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
 
-                    connection.conn = conn;
+                    openConnection = conn;
                     return __CREATE__();
-
-                };
+                },
+                openConnection;
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
@@ -620,8 +626,8 @@ module.exports = (function () {
 
                     sqlQuery = 'SELECT ' + selectQuery + ' FROM FINAL TABLE (UPDATE ' + collection.tableName + setQuery + whereQuery + ')';
 
-                    connection.conn.query(sqlQuery, params, function (err, results) {
-                        me.closeConnection(connection.conn);
+                    openConnection.query(sqlQuery, params, function (err, results) {
+                        me.closeConnection(openConnection);
                         if (err) return cb(err);
                         cb(null, results[0]);
                     });
@@ -629,9 +635,10 @@ module.exports = (function () {
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
 
-                    connection.conn = conn;
+                    openConnection = conn;
                     return __UPDATE__();
-                };
+                },
+                openConnection;
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
@@ -666,8 +673,8 @@ module.exports = (function () {
 
                     if (whereQuery.length > 0) whereQuery = ' WHERE ' + whereQuery;
 
-                    connection.conn.query('DELETE FROM ' + collection.tableName + whereQuery, params, function (err, result) {
-                        me.closeConnection(connection.conn);
+                    openConnection.query('DELETE FROM ' + collection.tableName + whereQuery, params, function (err, result) {
+                        me.closeConnection(openConnection);
                         if (err) return cb(err);
                         cb(null, result);
                     });
@@ -675,9 +682,10 @@ module.exports = (function () {
                 operationCallback = function (err, conn) {
                     if (err) return cb(err);
 
-                    connection.conn = conn;
+                    openConnection = conn;
                     return __DESTROY__();
-                };
+                },
+                openConnection;
 
             if (connection.pool) return connection.pool.open(connectionString, operationCallback);
             else return db2.open(connectionString, operationCallback);
@@ -775,7 +783,6 @@ module.exports = (function () {
 
 
     };
-
 
     // Expose adapter definition
     return adapter;
