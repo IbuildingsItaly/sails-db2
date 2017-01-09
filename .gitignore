@@ -1,3 +1,4 @@
+
 .\#*
 *#
 node_modules
@@ -7,3 +8,4 @@ ssl
 .idea
 nbproject
 npm-debug.log
+test.js
