@@ -11,8 +11,8 @@
     "url": "https://github.com/IbuildingsItaly/sails-db2"
   },
   "engines": {
-    "node": ">=0.12.13",
-    "npm": "~2.15.0"
+    "node": ">=6.9.1",
+    "npm": "~3.10.8"
   },
   "keywords": [
     "DB2",
@@ -41,7 +41,7 @@
   "license": "MIT",
   "readmeFilename": "README.md",
   "dependencies": {
-    "ibm_db": "~0.0.8",
+    "ibm_db": "~1.0.0",
     "async": "~0.9.0",
     "lodash": "~2.4.1",
     "waterline-errors": "~0.10.0"
