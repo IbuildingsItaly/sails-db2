@@ -474,7 +474,8 @@ module.exports = (function () {
                         fromQuery = ' FROM ' + me.getTableName(collection.tableName, connection.config.schemaDB2),
                         whereData = [],
                         whereQuery = '',
-                        limitQuery = !_.isEmpty(options.limit) ? ' FETCH FIRST ' + options.limit + ' ROWS ONLY ' : '',
+                        limitQuery = ((options.limit != null) && (!isNaN(options.limit))) ? ' LIMIT ' + options.limit + ' ' : '',
+                        offsetQuery = ((options.skip != null) && (!isNaN(options.skip))) ? ' OFFSET ' + options.skip + ' ' : '',
                         sortData = [],
                         sortQuery = '',
                         params = [],
@@ -490,8 +491,10 @@ module.exports = (function () {
                                 else params.push(val);
                             });
                             whereData.push('(' + whereArr.join(' OR ') + ')');
-                        }
-                        else {
+                        } else if (param['contains'] != null) {
+                            whereData.push(column + ' LIKE ?');
+                            params.push( '%' + param['contains'] + '%' );
+                        } else {
                             if (collection.definition.hasOwnProperty(column)) {
                                 whereData.push(column + ' = ?');
                                 if (collection.definition[column].type === 'boolean') params.push(param === true ? 1 : 0);
@@ -506,14 +509,17 @@ module.exports = (function () {
                     _.each(options.sort, function (direction, column) {
                         if (collection.definition.hasOwnProperty(column)) {
                             //ORDER BY APPLICATIONCODE DESC
-
-                            sortData.push(column + ' ' + direction);
+                            if (direction < 0) {
+                              sortData.push(column + ' DESC ');
+                            } else {
+                              sortData.push(column + ' ASC ');
+                            }
                         }
                     });
                     sortQuery += sortData.join(', ');
                     if (sortQuery.length > 0) sortQuery = ' ORDER BY ' + sortQuery;
 
-                    sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery;
+                    sqlQuery += selectQuery + fromQuery + whereQuery + sortQuery + limitQuery + offsetQuery;
                     openConnection.query(sqlQuery, params, function (err, result) {
                         me.closeConnection(openConnection);
                         if (err) return cb(err);
