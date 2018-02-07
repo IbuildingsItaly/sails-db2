@@ -492,7 +492,7 @@ module.exports = (function () {
                             });
                             whereData.push('(' + whereArr.join(' OR ') + ')');
                         } else if (param['contains'] != null) {
-                            whereData.push(column + ' LIKE ?');
+                            whereData.push('LOWER(' + column + ') LIKE LOWER(?) ');
                             params.push( '%' + param['contains'] + '%' );
                         } else {
                             if (collection.definition.hasOwnProperty(column)) {
