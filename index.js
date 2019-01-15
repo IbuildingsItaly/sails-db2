@@ -494,6 +494,12 @@ module.exports = (function () {
                         } else if (param['contains'] != null) {
                             whereData.push('LOWER(' + column + ') LIKE LOWER(?) ');
                             params.push( '%' + param['contains'] + '%' );
+                        } else if (param['>'] != null) {
+                            whereData.push(column + ' > ?');
+                            params.push( param['>'] );
+                        } else if (param['<'] != null) {
+                            whereData.push(column + ' < ?');
+                            params.push( param['<'] );
                         } else {
                             if (collection.definition.hasOwnProperty(column)) {
                                 whereData.push(column + ' = ?');
