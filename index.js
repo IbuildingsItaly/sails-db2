@@ -483,7 +483,10 @@ module.exports = (function () {
 
                     // Building where clause
                     _.each(options.where, function (param, column) {
-                        if (_.isArray(param)) {
+                        if (param == null) {
+                            whereData.push(column + ' IS NULL');
+                            params.push(param);
+                        } else if (_.isArray(param)) {
                             var whereArr = [];
                             param.forEach(function (val) {
                                 whereArr.push(column + ' = ?');
