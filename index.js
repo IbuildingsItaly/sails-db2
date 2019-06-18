@@ -62,6 +62,7 @@ module.exports = (function () {
             'UID=' + connection.config.user,
             'PWD=' + connection.config.password,
             'PORT=' + connection.config.port,
+            'PATCH2=' + connection.config.patch2,
             'PROTOCOL=TCPIP'
         ];
 
